@@ -3017,12 +3017,15 @@ private def parseTagSig (types : Array TypeEntry) (xs : List Sexpr)
   let xs := xs.dropWhile fun
     | .list (.atom "export" :: _) => true
     | _ => false
+  -- Results are retained so validation can reject them: a tag's type must
+  -- have an empty result (tag.wast:19/23).
   match xs with
   | .list [.atom "type", .atom ref] :: _ =>
-    let (ps, _) ← resolveTypeRef types ref
-    .ok { params := ps }
+    let (ps, rs) ← resolveTypeRef types ref
+    .ok { params := ps, results := rs }
   | _ =>
     let mut ps : List Wasm.ValueType := []
+    let mut rs : List Wasm.ValueType := []
     for x in xs do
       match x with
       | .list (.atom "param" :: tail) =>
@@ -3032,8 +3035,13 @@ private def parseTagSig (types : Array TypeEntry) (xs : List Sexpr)
             if startsWith a "$" then pure ()
             else ps := ps ++ [(atomToValueType? a).getD .i32]
           | .list l => ps := ps ++ [listToValueType l]
+      | .list (.atom "result" :: tail) =>
+        for t in tail do
+          match t with
+          | .atom a => rs := rs ++ [(atomToValueType? a).getD .i32]
+          | .list l => rs := rs ++ [listToValueType l]
       | _ => pure ()
-    .ok { params := ps }
+    .ok { params := ps, results := rs }
 
 /-- Parse the type body of an imported global (`(global $id? <gt>)`) into
 a zero-initialised `GlobalDecl`. -/

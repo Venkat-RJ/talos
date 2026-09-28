@@ -63780,8 +63780,8 @@ table_size64.wast:64 assert_return pass
 tag.wast:3 module pass
 tag.wast:11 register pass
 tag.wast:13 module pass
-tag.wast:19 assert_invalid skipped:assert_invalid: not rejected
-tag.wast:23 assert_invalid skipped:assert_invalid: not rejected
+tag.wast:19 assert_invalid pass
+tag.wast:23 assert_invalid pass
 tag.wast:30 module pass
 tag.wast:38 register pass
 tag.wast:40 module pass

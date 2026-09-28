@@ -62,6 +62,14 @@ def validMemoryCopy64ValidationModule : Module :=
           [.constI64 0, .constI64 0, .constI64 1, .memoryCopy] }]
     memory := some { pagesMin := 1, is64 := true } }
 
+/-! ### Tag result types (`tag.wast:19/23`) -/
+
+def invalidTagResultValidationModule : Module :=
+  { funcs := [], tags := [{ results := [.i32] }] }
+
+def validTagParamsValidationModule : Module :=
+  { funcs := [], tags := [{ params := [.i32, .i64] }] }
+
 def invalidLoadWithoutMemoryModule : Module :=
   { funcs := [{ body := [.const 0, .load32 0], results := [.i32] }] }
 
@@ -602,6 +610,13 @@ theorem validator_rejects_mistyped_memory64_copy_length :
 
 theorem validator_accepts_typed_memory64_copy :
     validationSucceeds validMemoryCopy64ValidationModule = true := by decide +kernel
+
+theorem validator_rejects_tag_result :
+    validationErrorIs invalidTagResultValidationModule
+      "non-empty tag result type" = true := by decide +kernel
+
+theorem validator_accepts_tag_params :
+    validationSucceeds validTagParamsValidationModule = true := by decide +kernel
 
 theorem validator_rejects_load_without_memory :
     validationErrorIs invalidLoadWithoutMemoryModule

@@ -1507,6 +1507,9 @@ def Module.checkConstProgram
 /-- Run the partial structural validator. `throw` on the first violation. -/
 def Module.validate (m : Module) : Except String Unit := do
   m.checkInterface
+  -- A tag's type has no results (exception-handling proposal).
+  for tag in m.tags do
+    if !tag.results.isEmpty then throw "non-empty tag result type"
   if m.dataWithoutMemory then throw "unknown memory"
   match m.memory with
   | none => pure ()
