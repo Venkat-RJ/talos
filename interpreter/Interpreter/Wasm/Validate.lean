@@ -1504,20 +1504,24 @@ def Module.checkConstProgram
         if (m.funcSig? functionIndex).isNone then throw "unknown function"
     | _ => pure ()
 
-/-- A table declaration: the minimum size may not exceed the maximum, and the
-element type must have a default value. A non-nullable element type is only
-valid together with an initializer expression, which `TableDecl` does not
-model (the decoder rejects that syntax), so such a table cannot be
-instantiated and is rejected here. -/
-def TableDecl.checkDeclaration (table : TableDecl) : Except String Unit := do
+/-- A table's declared minimum size may not exceed its declared maximum. -/
+def TableDecl.checkLimits (table : TableDecl) : Except String Unit :=
   match table.max with
   | some maximum =>
       if table.min > maximum then
-        throw "size minimum must not be greater than maximum"
-  | none => pure ()
+        .error "size minimum must not be greater than maximum"
+      else .ok ()
+  | none => .ok ()
+
+/-- A table the module declares itself must have an element type with a
+default value. A non-nullable element type is only valid together with an
+initializer expression, which `TableDecl` does not model (the decoder rejects
+that syntax), so such a table cannot be instantiated and is rejected here.
+Imported tables are exempt: their contents come from the exporter. -/
+def TableDecl.checkDefaultableElement (table : TableDecl) : Except String Unit :=
   match table.elemType with
-  | .ref false _ => throw "type mismatch"
-  | _ => pure ()
+  | .ref false _ => .error "type mismatch"
+  | _ => .ok ()
 
 /-- Run the partial structural validator. `throw` on the first violation. -/
 def Module.validate (m : Module) : Except String Unit := do
@@ -1654,8 +1658,10 @@ def Module.validate (m : Module) : Except String Unit := do
   for f in m.funcs do
     Program.checkBranchDepth 0 f.body
     m.checkFuncStraight f
-  -- 5. Table declarations: limits and a defaultable element type.
-  for table in m.tables do
-    table.checkDeclaration
+  -- 5. Table declarations: limits for every table; a defaultable element type
+  -- for the module's own tables. Imports occupy the low indices.
+  for (table, index) in m.tables.zipIdx do
+    table.checkLimits
+    if index ≥ m.importedTables.length then table.checkDefaultableElement
 
 end Wasm

@@ -54,6 +54,13 @@ def invalidNonNullableConcreteTableElementValidationModule : Module :=
   { funcs := [], types := [{}],
     tables := [{ min := 10, elemType := .ref false (.concrete 0) }] }
 
+/-- An imported non-nullable table is initialised by its exporter, so no
+initializer is needed and the declaration is valid. -/
+def validImportedNonNullableTableValidationModule : Module :=
+  { funcs := []
+    importedTables := [("M", "t")]
+    tables := [{ min := 10, elemType := .ref false .func }] }
+
 def validNullableConcreteTableElementValidationModule : Module :=
   { funcs := [], types := [{}],
     tables := [{ min := 10, elemType := .ref true (.concrete 0) }] }
@@ -624,6 +631,9 @@ theorem validator_rejects_non_nullable_table_element :
 theorem validator_rejects_non_nullable_concrete_table_element :
     validationErrorIs invalidNonNullableConcreteTableElementValidationModule
       "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_imported_non_nullable_table :
+    validationSucceeds validImportedNonNullableTableValidationModule = true := by decide +kernel
 
 theorem validator_accepts_nullable_concrete_table_element :
     validationSucceeds validNullableConcreteTableElementValidationModule = true := by decide +kernel
