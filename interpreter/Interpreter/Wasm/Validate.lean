@@ -1593,8 +1593,9 @@ def Module.validate (m : Module) : Except String Unit := do
             if referenced.isMut then throw "constant expression required"
           | none => throw "unknown global"
         | _ => pure ()
-  -- 0. A type definition may refer only to types in its own recursion group
-  -- or in earlier ones: with singleton groups, to itself and earlier types.
+  -- Type definitions may refer only to types in their own recursion group or
+  -- in earlier ones: with singleton groups, to themselves and earlier types.
+  -- Checked before the `sub` declarations below, which rely on it.
   for (td, index) in m.gcTypes.zipIdx do
     let groupEnd := match td.recGroup with
       | some g =>
