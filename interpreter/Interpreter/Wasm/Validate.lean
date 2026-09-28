@@ -1563,8 +1563,8 @@ def Module.checkValueTypeIndices (m : Module) : Except String Unit := do
     m.checkValueTypeRefs (imp.params ++ imp.results)
   for f in m.funcs do
     m.checkValueTypeRefs (f.params ++ f.locals ++ f.results)
-    for instruction in f.body.allInstrs do
-      m.checkValueTypeRefs instruction.valueTypeRefs
+  -- Value types in instruction immediates (block types, static null-reference
+  -- types) are checked by `Module.validate`'s existing per-instruction pass.
   for global in m.globals do
     m.checkValueTypeRef global.valueType
     for instruction in (global.sourceInit.getD []).allInstrs do
@@ -1581,8 +1581,8 @@ def Module.checkValueTypeIndices (m : Module) : Except String Unit := do
 
 /-- Run the partial structural validator. `throw` on the first violation. -/
 def Module.validate (m : Module) : Except String Unit := do
-  m.checkValueTypeIndices
   m.checkInterface
+  m.checkValueTypeIndices
   if m.dataWithoutMemory then throw "unknown memory"
   match m.memory with
   | none => pure ()
@@ -1671,6 +1671,7 @@ def Module.validate (m : Module) : Except String Unit := do
     for i in f.body.allInstrs do
       for t in i.gcTypeRefs do
         if t ≥ nTypes then throw "unknown type"
+      m.checkValueTypeRefs i.valueTypeRefs
       i.checkBulkMemoryRefs m
       i.checkTableSegmentRefs m
       i.checkGlobalRefs m
