@@ -882,4 +882,99 @@ theorem validator_rejects_ref_eq_on_anyref :
     validationErrorIs invalidRefEqAnyValidationModule
       "type mismatch" = true := by decide +kernel
 
+/-! ### Local initialization (function-references proposal)
+
+A local whose type has no default value (a non-nullable reference) may only be
+read after `local.set`/`local.tee` on every path, and a structured construct
+forgets the initializations made inside it when it ends. Mirrors
+`local_init.wast` and `func.wast:660`. -/
+
+def invalidUninitializedLocalValidationModule : Module :=
+  { funcs :=
+      [{ locals := [.ref false .«extern»],
+         body := [.localGet 0, .drop] }] }
+
+def invalidUninitializedLocalAfterBlockValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body :=
+          [.block 0 0 [.localGet 0, .localSet 1, .localGet 0, .localTee 1, .drop],
+           .localGet 1, .drop] }] }
+
+def invalidUninitializedLocalInElseValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body :=
+          [.const 0,
+           .iff 0 0 [.localGet 0, .localSet 1] [.localGet 1, .drop]] }] }
+
+def invalidUninitializedLocalFromIfValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body :=
+          [.const 0,
+           .iff 0 0 [.localGet 0, .localSet 1] [.localGet 0, .localSet 1],
+           .localGet 1, .drop] }] }
+
+def invalidUninitializedConcreteLocalValidationModule : Module :=
+  { types := [{ params := [], results := [] }]
+    funcs :=
+      [{ locals := [.ref false (.concrete 0)],
+         body := [.localGet 0, .drop] }] }
+
+def validInitializedLocalAfterSetValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body := [.localGet 0, .localSet 1, .localGet 1],
+         results := [.ref false .«extern»] }] }
+
+def validInitializedLocalAfterTeeValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body := [.localGet 0, .localTee 1, .drop, .localGet 1],
+         results := [.ref false .«extern»] }] }
+
+def validInitializedLocalReadInBlockValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body := [.localGet 0, .localSet 1, .block 0 1 [.localGet 1]],
+         results := [.ref false .«extern»] }] }
+
+def validDefaultableLocalReadBeforeSetValidationModule : Module :=
+  { funcs :=
+      [{ locals := [.externref, .i32],
+         body := [.localGet 0, .drop, .localGet 1, .drop] }] }
+
+theorem validator_rejects_uninitialized_local :
+    validationErrorIs invalidUninitializedLocalValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_rejects_uninitialized_local_after_block :
+    validationErrorIs invalidUninitializedLocalAfterBlockValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_rejects_uninitialized_local_in_else :
+    validationErrorIs invalidUninitializedLocalInElseValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_rejects_uninitialized_local_from_if :
+    validationErrorIs invalidUninitializedLocalFromIfValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_rejects_uninitialized_concrete_local :
+    validationErrorIs invalidUninitializedConcreteLocalValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_accepts_initialized_local_after_set :
+    validationSucceeds validInitializedLocalAfterSetValidationModule = true := by decide +kernel
+
+theorem validator_accepts_initialized_local_after_tee :
+    validationSucceeds validInitializedLocalAfterTeeValidationModule = true := by decide +kernel
+
+theorem validator_accepts_initialized_local_read_in_block :
+    validationSucceeds validInitializedLocalReadInBlockValidationModule = true := by decide +kernel
+
+theorem validator_accepts_defaultable_local_read_before_set :
+    validationSucceeds validDefaultableLocalReadBeforeSetValidationModule = true := by decide +kernel
+
 end Wasm.Examples.SmallStep

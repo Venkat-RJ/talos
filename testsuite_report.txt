@@ -17238,7 +17238,7 @@ func.wast:635 assert_invalid pass
 func.wast:647 assert_invalid pass
 func.wast:651 assert_invalid pass
 func.wast:655 assert_invalid pass
-func.wast:660 assert_invalid skipped:assert_invalid: not rejected
+func.wast:660 assert_invalid pass
 func.wast:671 assert_invalid pass
 func.wast:675 assert_invalid pass
 func.wast:679 assert_invalid pass
@@ -19749,10 +19749,10 @@ local_init.wast:3 module pass
 local_init.wast:21 assert_return pass
 local_init.wast:22 assert_return pass
 local_init.wast:23 assert_return pass
-local_init.wast:26 assert_invalid skipped:assert_invalid: not rejected
-local_init.wast:30 assert_invalid skipped:assert_invalid: not rejected
+local_init.wast:26 assert_invalid pass
+local_init.wast:30 assert_invalid pass
 local_init.wast:40 assert_invalid pass
-local_init.wast:53 assert_invalid skipped:assert_invalid: not rejected
+local_init.wast:53 assert_invalid pass
 local_init.wast:66 module pass
 local_init.wast:74 assert_return pass
 local_set.wast:3 module pass

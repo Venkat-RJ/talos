@@ -770,6 +770,12 @@ structure CheckState where
   /-- Branches which leave the current instruction sequence. A surrounding
   structured construct consumes depth zero and decrements the rest. -/
   transfers : List Nat := []
+  /-- Locals known to hold a value on every path reaching this point
+  (function-references proposal, "local initialization"). Parameters are
+  initialized on entry; `local.set`/`local.tee` initialize their target; a
+  structured construct restores the set it started with when it ends. Only
+  consulted for locals whose type has no default value. -/
+  initialized : List Nat := []
 
 def checkedCompat (m : Module) (actual : CheckedType)
     (expected : ValueType) : Bool :=
@@ -796,6 +802,18 @@ def checkedNonNull : CheckedType → CheckedType
     match valueType.reference? with
     | some (_, heapType) => some (.ref false heapType)
     | none => some valueType
+
+/-- Whether a value type has a default value, so a local of that type may be
+read before it is written. Numeric and vector types default to zero and
+nullable references to null; only a non-nullable reference lacks a default. -/
+def ValueType.isDefaultable : ValueType → Bool
+  | .ref false _ => false
+  | _ => true
+
+/-- Record that `local.set`/`local.tee` has initialized local `index`. -/
+def CheckState.initialize (state : CheckState) (index : Nat) : CheckState :=
+  if state.initialized.contains index then state
+  else { state with initialized := index :: state.initialized }
 
 def CheckState.popExpected
     (m : Module) (state : CheckState)
@@ -1270,7 +1288,7 @@ def Program.checkTypes
                   throw "type mismatch"
             | none => pure ()
           let inner : CheckState :=
-            { stack := parameters, unreachable := false }
+            { stack := parameters, unreachable := false, initialized := state.initialized }
           let some bodyState ←
               Program.checkTypes m locals functionResults
                 ((resultArity, resultTypes?) :: labels) body inner
@@ -1281,6 +1299,7 @@ def Program.checkTypes
           pure (some
             { stack := fallthrough ++ outer.stack
               unreachable := state.unreachable
+              initialized := state.initialized
               transfers :=
                 lowerTransfers bodyState.transfers ++ state.transfers })
       | .block paramArity resultArity body paramTypes resultTypes => do
@@ -1292,7 +1311,7 @@ def Program.checkTypes
                 pure (types.reverse.map some, outer)
             | none => state.popAnyN paramArity
           let inner : CheckState :=
-            { stack := parameters, unreachable := false }
+            { stack := parameters, unreachable := false, initialized := state.initialized }
           let some bodyState ←
               Program.checkTypes m locals functionResults
                 ((resultArity, resultTypes?) :: labels) body inner
@@ -1303,6 +1322,7 @@ def Program.checkTypes
           pure (some
             { stack := fallthrough ++ outer.stack
               unreachable := state.unreachable
+              initialized := state.initialized
               transfers := lowerTransfers bodyState.transfers ++ state.transfers })
       | .loop paramArity resultArity body paramTypes resultTypes => do
           let parameterTypes? := declaredTypes? paramArity paramTypes
@@ -1313,7 +1333,7 @@ def Program.checkTypes
                 pure (types.reverse.map some, outer)
             | none => state.popAnyN paramArity
           let inner : CheckState :=
-            { stack := parameters, unreachable := false }
+            { stack := parameters, unreachable := false, initialized := state.initialized }
           let some bodyState ←
               Program.checkTypes m locals functionResults
                 ((paramArity, parameterTypes?) :: labels) body inner
@@ -1324,6 +1344,7 @@ def Program.checkTypes
           pure (some
             { stack := fallthrough ++ outer.stack
               unreachable := state.unreachable
+              initialized := state.initialized
               transfers := lowerTransfers bodyState.transfers ++ state.transfers })
       | .iff paramArity resultArity thenBody elseBody
           paramTypes resultTypes => do
@@ -1336,7 +1357,7 @@ def Program.checkTypes
                 pure (types.reverse.map some, outer)
             | none => afterCondition.popAnyN paramArity
           let branchStart : CheckState :=
-            { stack := parameters, unreachable := false }
+            { stack := parameters, unreachable := false, initialized := state.initialized }
           let some thenState ←
               Program.checkTypes m locals functionResults
                 ((resultArity, resultTypes?) :: labels) thenBody branchStart
@@ -1363,6 +1384,7 @@ def Program.checkTypes
           pure (some
             { stack := merged ++ outer.stack
               unreachable := state.unreachable
+              initialized := state.initialized
               transfers :=
                 lowerTransfers thenState.transfers ++
                 lowerTransfers elseState.transfers ++ state.transfers })
@@ -1465,6 +1487,22 @@ def Program.checkTypes
               stack := []
               unreachable := true
               transfers := 0 :: next.transfers })
+      | .localGet index => do
+          let some localType := locals[index]?
+            | pure none
+          if !localType.isDefaultable && !state.initialized.contains index then
+            throw "uninitialized local"
+          some <$> state.applySig m ([], [localType])
+      | .localSet index => do
+          let some localType := locals[index]?
+            | pure none
+          let next ← state.applySig m ([localType], [])
+          pure (some (next.initialize index))
+      | .localTee index => do
+          let some localType := locals[index]?
+            | pure none
+          let next ← state.applySig m ([localType], [localType])
+          pure (some (next.initialize index))
       | _ =>
           match instruction.straightSig m locals with
           | none => pure none
@@ -1482,7 +1520,7 @@ def Module.checkFuncStraight (m : Module) (f : Function) : Except String Unit :=
   let some finalState ←
       Program.checkTypes m locals f.results
         [(f.results.length, some f.results)] f.body
-        { stack := [] }
+        { stack := [], initialized := List.range f.params.length }
     | return ()
   let results ← finalState.requireArity f.results.length
   for (actual, expected) in results.reverse.zip f.results do
