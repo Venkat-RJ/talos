@@ -550,6 +550,20 @@ private def skipBlockType (resolveType : BlockTypeResolver) :
     | none   => (ps, rs, .atom a :: r)
   | ps, rs, xs => (ps, rs, xs)
 
+/-- Collect the `(result T*)` annotations of a typed `select` and nothing
+else: unlike block types, `select` admits no `(type N)` or `(param …)` form, so
+any other token ends the annotation. Returns `none` when no annotation is
+present (the untyped `select`). -/
+private def collectSelectResults : List Sexpr → Option (List Wasm.ValueType) × List Sexpr
+  | .list (.atom "result" :: ts) :: r =>
+    let here := ts.filterMap fun
+      | .atom a => atomToValueType? a
+      | .list l => some (listToValueType l)
+    match collectSelectResults r with
+    | (some more, rest) => (some (here ++ more), rest)
+    | (none, rest) => (some here, rest)
+  | xs => (none, xs)
+
 /-- Pull an optional `$label` and any `(type N)` / `(param T*)` /
 `(result T*)` annotations off the front of a block/loop/if's tokens.
 Returns the label (if any), parameter types, result types, and the
@@ -1461,11 +1475,8 @@ private def parseInstr (ctx : Ctx) (toks : List Sexpr)
     | "select"    =>
       -- `select (result t)*` keeps its annotation so validation can check
       -- the typed form; plain `select` decodes to `.select none`.
-      let annotated := match rest with
-        | .list (.atom "result" :: _) :: _ => true
-        | _ => false
-      let (_, rs, rest') := skipBlockType ctx.resolveBlockType [] [] rest
-      .ok ([.select (if annotated then some rs else none)], rest')
+      let (resultTypes, rest') := collectSelectResults rest
+      .ok ([.select resultTypes], rest')
     | "block"     =>
       parseStructured ctx
         (fun ps rs body => .block ps.length rs.length body ps rs)
@@ -1775,12 +1786,9 @@ partial_fixpoint
 
 private def foldedSelect (ctx : Ctx) (xs : List Sexpr)
     : Except Err (List Wasm.Instruction) := do
-  let annotated := xs.any fun
-    | .list (.atom "result" :: _) => true
-    | _ => false
-  let (_, rs, xs') := skipBlockType ctx.resolveBlockType [] [] xs
+  let (resultTypes, xs') := collectSelectResults xs
   let acc ← foldedOperands ctx "folded select" xs'
-  .ok (acc ++ [.select (if annotated then some rs else none)])
+  .ok (acc ++ [.select resultTypes])
 partial_fixpoint
 
 private def parseLocalTee (ctx : Ctx) (toks : List Sexpr)

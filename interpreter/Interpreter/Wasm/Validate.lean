@@ -1190,6 +1190,8 @@ def Program.checkTypes
           match resultTypes with
           | some [selectType] =>
               -- Typed `select t`: both operands and the result are `t`.
+              -- Same two-table lookup as `Module.typeIndexKnown` in #251; call
+              -- that helper once it lands.
               match selectType with
               | .ref _ (.concrete index) =>
                   if index ≥ m.types.length && index ≥ m.gcTypes.length then
