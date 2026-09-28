@@ -1448,7 +1448,9 @@ theorem wp_tableGet
     {remainder : List Value} {controls : List ControlFrame}
     {calls : List CallFrame}
     (hindex : index.addrNat? = some elementIndex)
-    (helement : table[elementIndex]? = some value) :
+    (helement : table[elementIndex]? = some value)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let current : ThreadState α :=
       ⟨⟨params, localValues, index :: values⟩,
         .tableGet tableIndex :: code, arity, remainder, controls, calls⟩
@@ -1465,7 +1467,9 @@ theorem wp_tableGet
   simp only [← tablePointsToAt_eq]
   wasm_table_agree Hphysical, tableIndex, table, (obs ++ obs') $$
     [Hσ Htable]
-  wasm_wp_step_frame Step.tableGet (α := α) hindex Hphysical helement
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
+  wasm_wp_step_frame Step.tableGet (α := α) hindex Hphysical' helement
 
 /-- Primitive rule for `table.size`. Runtime-module ownership determines
 whether the result is represented as an `i32` or `i64`; table ownership
@@ -1476,7 +1480,9 @@ theorem wp_tableSize
     {tableIndex : Nat} {table : TableInst}
     {code : Program} {arity : Nat}
     {remainder : List Value} {controls : List ControlFrame}
-    {calls : List CallFrame} :
+    {calls : List CallFrame}
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let current : ThreadState α :=
       ⟨⟨params, localValues, values⟩,
         .tableSize tableIndex :: code, arity, remainder, controls, calls⟩
@@ -1495,7 +1501,9 @@ theorem wp_tableSize
     [Hσ Htable]
   wasm_runtime_module_agree (obs ++ obs'), callerId, runtimeModule $$ [$Hσ $Hruntime]
   subst runtimeModule
-  wasm_wp_step_frame Step.tableSize Hphysical
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
+  wasm_wp_step_frame Step.tableSize Hphysical'
 
 /-- Primitive rule for an in-bounds `table.set`. The table keeps its stable
 identity while its complete owned contents and physical instance update
@@ -1507,7 +1515,9 @@ theorem wp_tableSet
     {remainder : List Value} {controls : List ControlFrame}
     {calls : List CallFrame}
     (hindex : index.addrNat? = some elementIndex)
-    (hbound : elementIndex < table.length) :
+    (hbound : elementIndex < table.length)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let newTable := listSetAt table elementIndex value
     let current : ThreadState α :=
       ⟨⟨params, localValues, value :: index :: values⟩,
@@ -1525,6 +1535,8 @@ theorem wp_tableSet
   simp only [← tablePointsToAt_eq]
   wasm_table_agree Hphysical, tableIndex, table, (obs ++ obs') $$
     [Hσ Htable]
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
   let newTable := listSetAt table elementIndex value
   let updatedStore : MachineStore α :=
     { store with wasm :=
@@ -1539,8 +1551,10 @@ theorem wp_tableSet
       ⟨.running
         ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-        updatedStore⟩ :=
-    Step.tableSet hindex Hphysical hbound
+        updatedStore⟩ := by
+    dsimp only [updatedStore]
+    rw [← setTableAt_eq_of_canonical store tableIndex newTable (hcanonical store)]
+    exact Step.tableSet hindex Hphysical' hbound
   wasm_wp_step expectedStep =>
     imod stateInterp_table_set store ns
         obs' nt
@@ -1558,7 +1572,9 @@ theorem wp_tableGrow32
     {remainder : List Value} {controls : List ControlFrame}
     {calls : List CallFrame}
     (hbound :
-      table.length + delta.toNat ≤ runtimeModule.tableCap tableIndex) :
+      table.length + delta.toNat ≤ runtimeModule.tableCap tableIndex)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let newTable := table ++ List.replicate delta.toNat initial
     let current : ThreadState α :=
       ⟨⟨params, localValues, .i32 delta :: initial :: values⟩,
@@ -1574,6 +1590,8 @@ theorem wp_tableGrow32
   wasm_wp_start_with iintro ⟨Htable, Hruntime⟩ Hwp
   wasm_table_agree Hphysical, tableIndex, table, (obs ++ obs') $$
     [Hσ Htable]
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
   wasm_runtime_module_agree (obs ++ obs'), callerId, runtimeModule $$ [$Hσ $Hruntime]
   have hbound' :
       table.length + delta.toNat ≤
@@ -1592,8 +1610,10 @@ theorem wp_tableGrow32
       ⟨.running
         ⟨⟨params, localValues, .i32 table.length.toUInt32 :: values⟩,
           code, arity, remainder, controls, calls⟩,
-        updatedStore⟩ :=
-    Step.tableGrow32 Hphysical hbound'
+        updatedStore⟩ := by
+    dsimp only [updatedStore]
+    rw [← setTableAt_eq_of_canonical store tableIndex newTable (hcanonical store)]
+    exact Step.tableGrow32 Hphysical' hbound'
   wasm_wp_step expectedStep =>
     imod stateInterp_table_set store ns
         obs' nt
@@ -1611,7 +1631,9 @@ theorem wp_tableGrow64
     {remainder : List Value} {controls : List ControlFrame}
     {calls : List CallFrame}
     (hbound :
-      table.length + delta.toNat ≤ runtimeModule.tableCap tableIndex) :
+      table.length + delta.toNat ≤ runtimeModule.tableCap tableIndex)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let newTable := table ++ List.replicate delta.toNat initial
     let current : ThreadState α :=
       ⟨⟨params, localValues, .i64 delta :: initial :: values⟩,
@@ -1627,6 +1649,8 @@ theorem wp_tableGrow64
   wasm_wp_start_with iintro ⟨Htable, Hruntime⟩ Hwp
   wasm_table_agree Hphysical, tableIndex, table, (obs ++ obs') $$
     [Hσ Htable]
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
   wasm_runtime_module_agree (obs ++ obs'), callerId, runtimeModule $$ [$Hσ $Hruntime]
   have hbound' :
       table.length + delta.toNat ≤
@@ -1645,8 +1669,10 @@ theorem wp_tableGrow64
       ⟨.running
         ⟨⟨params, localValues, .i64 table.length.toUInt64 :: values⟩,
           code, arity, remainder, controls, calls⟩,
-        updatedStore⟩ :=
-    Step.tableGrow64 Hphysical hbound'
+        updatedStore⟩ := by
+    dsimp only [updatedStore]
+    rw [← setTableAt_eq_of_canonical store tableIndex newTable (hcanonical store)]
+    exact Step.tableGrow64 Hphysical' hbound'
   wasm_wp_step expectedStep =>
     imod stateInterp_table_set store ns
         obs' nt
@@ -1665,7 +1691,9 @@ theorem wp_tableGrow32Failure
     {remainder : List Value} {controls : List ControlFrame}
     {calls : List CallFrame}
     (hbound :
-      ¬table.length + delta.toNat ≤ runtimeModule.tableCap tableIndex) :
+      ¬table.length + delta.toNat ≤ runtimeModule.tableCap tableIndex)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let current : ThreadState α :=
       ⟨⟨params, localValues, .i32 delta :: initial :: values⟩,
         .tableGrow tableIndex :: code, arity, remainder, controls, calls⟩
@@ -1684,7 +1712,9 @@ theorem wp_tableGrow32Failure
   have hbound' :
       ¬table.length + delta.toNat ≤
         store.runtime.currentModule.tableCap tableIndex := by simpa only [Hmodule] using hbound
-  wasm_wp_step_frame Step.tableGrow32Failure Hphysical hbound'
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
+  wasm_wp_step_frame Step.tableGrow32Failure Hphysical' hbound'
 
 /-- Failed table64 `table.grow`; returns the 64-bit all-ones sentinel and
 preserves complete ownership of the unchanged table. -/
@@ -1697,7 +1727,9 @@ theorem wp_tableGrow64Failure
     {remainder : List Value} {controls : List ControlFrame}
     {calls : List CallFrame}
     (hbound :
-      ¬table.length + delta.toNat ≤ runtimeModule.tableCap tableIndex) :
+      ¬table.length + delta.toNat ≤ runtimeModule.tableCap tableIndex)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let current : ThreadState α :=
       ⟨⟨params, localValues, .i64 delta :: initial :: values⟩,
         .tableGrow tableIndex :: code, arity, remainder, controls, calls⟩
@@ -1717,7 +1749,9 @@ theorem wp_tableGrow64Failure
   have hbound' :
       ¬table.length + delta.toNat ≤
         store.runtime.currentModule.tableCap tableIndex := by simpa only [Hmodule] using hbound
-  wasm_wp_step_frame Step.tableGrow64Failure Hphysical hbound'
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
+  wasm_wp_step_frame Step.tableGrow64Failure Hphysical' hbound'
 
 /-- In-bounds `table.fill`. The complete authoritative table fragment is
 updated to the same `listWriteAt` result as the physical machine table. -/
@@ -1730,7 +1764,9 @@ theorem wp_tableFill
     {calls : List CallFrame}
     (hlength : length.addrNat? = some lengthNat)
     (hdestination : destination.addrNat? = some destinationNat)
-    (hbound : destinationNat + lengthNat ≤ table.length) :
+    (hbound : destinationNat + lengthNat ≤ table.length)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let newTable :=
       listWriteAt table destinationNat (List.replicate lengthNat value)
     let current : ThreadState α :=
@@ -1749,6 +1785,8 @@ theorem wp_tableFill
   simp only [← tablePointsToAt_eq]
   wasm_table_agree Hphysical, tableIndex, table, (obs ++ obs') $$
     [Hσ Htable]
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
   let newTable :=
     listWriteAt table destinationNat (List.replicate lengthNat value)
   let updatedStore : MachineStore α :=
@@ -1764,8 +1802,10 @@ theorem wp_tableFill
       ⟨.running
         ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-        updatedStore⟩ :=
-    Step.tableFill hlength hdestination Hphysical hbound
+        updatedStore⟩ := by
+    dsimp only [updatedStore]
+    rw [← setTableAt_eq_of_canonical store tableIndex newTable (hcanonical store)]
+    exact Step.tableFill hlength hdestination Hphysical' hbound
   wasm_wp_step expectedStep =>
     imod stateInterp_table_set store ns
         obs' nt
@@ -1786,7 +1826,9 @@ theorem wp_tableCopySame
     (hsource : source.addrNat? = some sourceNat)
     (hdestination : destination.addrNat? = some destinationNat)
     (hdestinationBound : destinationNat + lengthNat ≤ table.length)
-    (hsourceBound : sourceNat + lengthNat ≤ table.length) :
+    (hsourceBound : sourceNat + lengthNat ≤ table.length)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let newTable :=
       listWriteAt table destinationNat
         ((table.drop sourceNat).take lengthNat)
@@ -1807,6 +1849,8 @@ theorem wp_tableCopySame
   simp only [← tablePointsToAt_eq]
   wasm_table_agree Hphysical, tableIndex, table, (obs ++ obs') $$
     [Hσ Htable]
+  have Hphysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Hphysical
   let newTable :=
     listWriteAt table destinationNat
       ((table.drop sourceNat).take lengthNat)
@@ -1824,9 +1868,11 @@ theorem wp_tableCopySame
       ⟨.running
         ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-        updatedStore⟩ :=
-    Step.tableCopy hlength hsource hdestination
-      Hphysical Hphysical hdestinationBound hsourceBound
+        updatedStore⟩ := by
+    dsimp only [updatedStore]
+    rw [← setTableAt_eq_of_canonical store tableIndex newTable (hcanonical store)]
+    exact Step.tableCopy hlength hsource hdestination
+      Hphysical' Hphysical' hdestinationBound hsourceBound
   wasm_wp_step expectedStep =>
     imod stateInterp_table_set store ns
         obs' nt
@@ -1850,7 +1896,13 @@ theorem wp_tableCopyDistinct
     (hdestination : destination.addrNat? = some destinationNat)
     (hdestinationBound :
       destinationNat + lengthNat ≤ destinationTable.length)
-    (hsourceBound : sourceNat + lengthNat ≤ sourceTable.length) :
+    (hsourceBound : sourceNat + lengthNat ≤ sourceTable.length)
+    (hcanonicalDestination : ∀ store : MachineStore α,
+      canonicalTableIndex store destinationTableIndex = destinationTableIndex :=
+        by intro _; rfl)
+    (hcanonicalSource : ∀ store : MachineStore α,
+      canonicalTableIndex store sourceTableIndex = sourceTableIndex :=
+        by intro _; rfl) :
     let newDestinationTable :=
       listWriteAt destinationTable destinationNat
         ((sourceTable.drop sourceNat).take lengthNat)
@@ -1875,6 +1927,11 @@ theorem wp_tableCopyDistinct
     destinationTable, (obs ++ obs') $$ [Hσ Hdestination]
   wasm_table_agree HsourcePhysical, sourceTableIndex, sourceTable,
     (obs ++ obs') $$ [Hσ Hsource]
+  have HdestinationPhysical' :
+      tableAt? store destinationTableIndex = some destinationTable := by
+    simpa [tableAt?, hcanonicalDestination] using HdestinationPhysical
+  have HsourcePhysical' : tableAt? store sourceTableIndex = some sourceTable := by
+    simpa [tableAt?, hcanonicalSource] using HsourcePhysical
   let newDestinationTable :=
     listWriteAt destinationTable destinationNat
       ((sourceTable.drop sourceNat).take lengthNat)
@@ -1894,9 +1951,12 @@ theorem wp_tableCopyDistinct
       ⟨.running
         ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-        updatedStore⟩ :=
-    Step.tableCopy hlength hsource hdestination
-      HdestinationPhysical HsourcePhysical
+        updatedStore⟩ := by
+    dsimp only [updatedStore]
+    rw [← setTableAt_eq_of_canonical store destinationTableIndex newDestinationTable
+      (hcanonicalDestination store)]
+    exact Step.tableCopy hlength hsource hdestination
+      HdestinationPhysical' HsourcePhysical'
       hdestinationBound hsourceBound
   wasm_wp_step expectedStep =>
     imod stateInterp_table_set store ns
@@ -3881,7 +3941,9 @@ theorem wp_tableInitLive
         ((runtimeModule.elements[elementIndex]?.map
           ElementSegment.values).getD []).length)
     (hdestinationBound :
-      destinationNat + length.toNat ≤ table.length) :
+      destinationNat + length.toNat ≤ table.length)
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let segmentValues :=
       (runtimeModule.elements[elementIndex]?.map
         ElementSegment.values).getD []
@@ -3907,6 +3969,8 @@ theorem wp_tableInitLive
   wasm_wp_start_with iintro ⟨Htable, Hsegment, Hruntime⟩ Hwp
   wasm_table_agree HtablePhysical, tableIndex, table, (obs ++ obs') $$
     [Hσ Htable]
+  have HtablePhysical' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using HtablePhysical
   wasm_element_segment_agree HsegmentPhysical, elementIndex,
     (some entries), (obs ++ obs') $$ [Hσ Hsegment]
   wasm_runtime_module_agree (obs ++ obs'), callerId, runtimeModule $$ [$Hσ $Hruntime]
@@ -3938,8 +4002,10 @@ theorem wp_tableInitLive
       ⟨.running
         ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-        updatedStore⟩ :=
-    Step.tableInit hdestination HtablePhysical HsegmentPhysical
+        updatedStore⟩ := by
+    dsimp only [updatedStore]
+    rw [← setTableAt_eq_of_canonical store tableIndex newTable (hcanonical store)]
+    exact Step.tableInit hdestination HtablePhysical' HsegmentPhysical
       hvalues hsourceBound' hdestinationBound
   wasm_wp_step expectedStep =>
     imod stateInterp_table_set store ns
@@ -4962,7 +5028,9 @@ theorem wp_callIndirect
     {code : Program} {arity : Nat} {remainder : List Value}
     {controls : List ControlFrame} {calls : List CallFrame}
     (hselector : selector.addrNat? = some elementIndex)
-    (helement : table[elementIndex]? = some (.funcref (some functionIndex))) :
+    (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
+    (hcanonical : ∀ store : MachineStore α,
+      canonicalTableIndex store tableIndex = tableIndex := by intro _; rfl) :
     let current : ThreadState α :=
       ⟨⟨params, localValues, selector :: values⟩,
         .callIndirect typeIndex tableIndex :: code,
@@ -5003,7 +5071,9 @@ theorem wp_callIndirect
     simpa only [Hmodule] using hexpected
   have htype' : store.runtime.currentModule.indirectCallTypeOk
       functionIndex typeIndex signature expected = true := by simpa only [Hmodule] using htype
-  wasm_wp_step Step.callIndirect (α := α) hselector Htablephys helement
+  have Htablephys' : tableAt? store tableIndex = some table := by
+    simpa [tableAt?, hcanonical] using Htablephys
+  wasm_wp_step Step.callIndirect (α := α) hselector Htablephys' helement
     himports' hnotforeign' hfn' hsignature' hexpected' htype' =>
     wasm_wp_frame
       ispecialize Hwp $$ %store.runtime.entry

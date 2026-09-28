@@ -41,11 +41,11 @@ theorem tableProbe_steps (m : Module) (st : Store Unit)
   apply Steps.cons .const
   apply Steps.cons (.tableGet
     (table := [.funcref (some 0), .funcref (some 1), .funcref none])
-    (value := .funcref none) rfl (by simp [htbl]) rfl)
+    (value := .funcref none) rfl (by simp [tableAt?, htbl]) rfl)
   apply Steps.cons (.refIsNullTrue rfl)
   apply Steps.cons (.tableSize
     (table := [.funcref (some 0), .funcref (some 1), .funcref none])
-    (by simp [htbl]))
+    (by simp [tableAt?, htbl]))
   apply Steps.cons .finish
   simpa [tableProbeConfig, h64, sizeValue,
          RuntimeEnv.currentModule, RuntimeEnv.currentInstance] using

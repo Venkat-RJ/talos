@@ -937,7 +937,11 @@ private def commitStore (sst : ScriptState) (m : Wasm.Module)
         memories := memories.set! id (memory, store.memoryCap m index)
     | none => pure ()
   for (id, index) in store.tableIds.zipIdx do
-    match store.tables[index]? with
+    -- Two local indices may carry one identity (a table imported twice).
+    -- Execution reads and writes the first such index (`canonicalTableIndex`),
+    -- so commit from that slot rather than from a stale alias.
+    let canonical := (store.tableIds.findIdx? (· = id)).getD index
+    match store.tables[canonical]? with
     | some table =>
       if id < tables.size then
         tables := tables.set! id

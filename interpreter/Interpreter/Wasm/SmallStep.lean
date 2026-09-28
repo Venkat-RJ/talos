@@ -424,6 +424,45 @@ private def setTables (store : MachineStore α) (tables : List TableInst) :
     MachineStore α :=
   { store with wasm := { store.wasm with tables := tables } }
 
+/-- Two local table indices may name one instantiated table: a module that
+imports the same table twice, or a table exported under two names. Resolve a
+local index to the first local index carrying the same stable identity, as
+`canonicalMemoryIndex` and `canonicalGlobalIndex` do for memories and
+globals. Index `0` is always canonical. -/
+def canonicalTableIndex (store : MachineStore α) : Nat → Nat
+  | 0 => 0
+  | index + 1 =>
+    match store.wasm.tableIds[index + 1]? with
+    | some id => (store.wasm.tableIds.findIdx? (· = id)).getD (index + 1)
+    | none => index + 1
+
+@[simp] theorem canonicalTableIndex_zero (store : MachineStore α) :
+    canonicalTableIndex store 0 = 0 := rfl
+
+/-- The instantiated table a local table index denotes. -/
+def tableAt? (store : MachineStore α) (index : Nat) : Option TableInst :=
+  store.wasm.tables[canonicalTableIndex store index]?
+
+/-- Replace the instantiated table a local table index denotes. -/
+def setTableAt (store : MachineStore α) (index : Nat) (table : TableInst) :
+    MachineStore α :=
+  setTables store (listSetAt store.wasm.tables (canonicalTableIndex store index) table)
+
+/-- Unfolding equations for proof layers whose table ownership is keyed by a
+canonical local index, mirroring `setGlobal_eq_of_canonical`. -/
+theorem tableAt?_eq_of_canonical (store : MachineStore α) (index : Nat)
+    (h : canonicalTableIndex store index = index) :
+    tableAt? store index = store.wasm.tables[index]? := by
+  simp [tableAt?, h]
+
+theorem setTableAt_eq_of_canonical
+    (store : MachineStore α) (index : Nat) (table : TableInst)
+    (h : canonicalTableIndex store index = index) :
+    setTableAt store index table =
+      { store with wasm :=
+          { store.wasm with tables := listSetAt store.wasm.tables index table } } := by
+  simp [setTableAt, setTables, h]
+
 private def setElementSegments (store : MachineStore α)
     (segments : List (Option (List (Option Nat)))) : MachineStore α :=
   { store with wasm := { store.wasm with elementSegments := segments } }
@@ -1280,7 +1319,7 @@ private def stepPlainChecked?
       | .callIndirect typeIndex tableIndex =>
         match thread.locals.values with
         | selector :: values =>
-          match selector.addrNat?, store.wasm.tables[tableIndex]? with
+          match selector.addrNat?, tableAt? store tableIndex with
           | some elementIndex, some table =>
             match table[elementIndex]? with
             | none =>
@@ -1456,7 +1495,7 @@ private def stepPlainChecked?
       | .returnCallIndirect typeIndex tableIndex =>
         match thread.locals.values with
         | selector :: values =>
-          match selector.addrNat?, store.wasm.tables[tableIndex]? with
+          match selector.addrNat?, tableAt? store tableIndex with
           | some elementIndex, some table =>
             match table[elementIndex]? with
             | none =>
@@ -1732,7 +1771,7 @@ private def stepPlainChecked?
       | .tableGet tableIndex =>
         match thread.locals.values with
         | index :: values =>
-          match index.addrNat?, store.wasm.tables[tableIndex]? with
+          match index.addrNat?, tableAt? store tableIndex with
           | some elementIndex, some table =>
             match table[elementIndex]? with
             | some value =>
@@ -1744,7 +1783,7 @@ private def stepPlainChecked?
           | _, none => .error ⟨s!"table index {tableIndex} is invalid"⟩
         | [] => .error ⟨"table.get requires an integer index operand"⟩
       | .tableSize tableIndex =>
-        match store.wasm.tables[tableIndex]? with
+        match tableAt? store tableIndex with
         | some table =>
           next { thread.locals with
             values :=
@@ -1754,13 +1793,11 @@ private def stepPlainChecked?
       | .tableSet tableIndex =>
         match thread.locals.values with
         | value :: index :: values =>
-          match index.addrNat?, store.wasm.tables[tableIndex]? with
+          match index.addrNat?, tableAt? store tableIndex with
           | some elementIndex, some table =>
             if elementIndex < table.length then
               next { thread.locals with values }
-                (setTables store
-                  (listSetAt store.wasm.tables tableIndex
-                    (listSetAt table elementIndex value)))
+                (setTableAt store tableIndex (listSetAt table elementIndex value))
             else
               .ok (some (.instruction instr,
                 ⟨.trapped .outOfBoundsTable, store⟩))
@@ -1770,29 +1807,25 @@ private def stepPlainChecked?
       | .tableGrow tableIndex =>
         match thread.locals.values with
         | .i32 delta :: initial :: values =>
-          match store.wasm.tables[tableIndex]? with
+          match tableAt? store tableIndex with
           | some table =>
             if table.length + delta.toNat ≤
                 store.runtime.currentModule.tableCap tableIndex then
               next { thread.locals with
                 values := .i32 table.length.toUInt32 :: values }
-                (setTables store
-                  (listSetAt store.wasm.tables tableIndex
-                    (table ++ List.replicate delta.toNat initial)))
+                (setTableAt store tableIndex (table ++ List.replicate delta.toNat initial))
             else
               next { thread.locals with
                 values := .i32 (0xFFFFFFFF : UInt32) :: values }
           | none => .error ⟨s!"table index {tableIndex} is invalid"⟩
         | .i64 delta :: initial :: values =>
-          match store.wasm.tables[tableIndex]? with
+          match tableAt? store tableIndex with
           | some table =>
             if table.length + delta.toNat ≤
                 store.runtime.currentModule.tableCap tableIndex then
               next { thread.locals with
                 values := .i64 table.length.toUInt64 :: values }
-                (setTables store
-                  (listSetAt store.wasm.tables tableIndex
-                    (table ++ List.replicate delta.toNat initial)))
+                (setTableAt store tableIndex (table ++ List.replicate delta.toNat initial))
             else
               next { thread.locals with
                 values := .i64 (0xFFFFFFFFFFFFFFFF : UInt64) :: values }
@@ -1802,17 +1835,15 @@ private def stepPlainChecked?
         match thread.locals.values with
         | length :: value :: destination :: values =>
           match length.addrNat?, destination.addrNat?,
-              store.wasm.tables[tableIndex]? with
+              tableAt? store tableIndex with
           | some length, some destination, some table =>
             if destination + length > table.length then
               .ok (some (.instruction instr,
                 ⟨.trapped .outOfBoundsTable, store⟩))
             else
               next { thread.locals with values }
-                (setTables store
-                  (listSetAt store.wasm.tables tableIndex
-                    (listWriteAt table destination
-                      (List.replicate length value))))
+                (setTableAt store tableIndex (listWriteAt table destination
+                      (List.replicate length value)))
           | none, _, _ | _, none, _ =>
             .error ⟨"table.fill requires integer destination and length operands"⟩
           | _, _, none => .error ⟨s!"table index {tableIndex} is invalid"⟩
@@ -1821,8 +1852,8 @@ private def stepPlainChecked?
         match thread.locals.values with
         | length :: source :: destination :: values =>
           match length.addrNat?, source.addrNat?, destination.addrNat?,
-              store.wasm.tables[destinationTableIndex]?,
-              store.wasm.tables[sourceTableIndex]? with
+              tableAt? store destinationTableIndex,
+              tableAt? store sourceTableIndex with
           | some length, some source, some destination,
               some destinationTable, some sourceTable =>
             if destination + length > destinationTable.length ∨
@@ -1832,9 +1863,7 @@ private def stepPlainChecked?
             else
               let slice := (sourceTable.drop source).take length
               next { thread.locals with values }
-                (setTables store
-                  (listSetAt store.wasm.tables destinationTableIndex
-                    (listWriteAt destinationTable destination slice)))
+                (setTableAt store destinationTableIndex (listWriteAt destinationTable destination slice))
           | none, _, _, _, _ | _, none, _, _, _ | _, _, none, _, _ =>
             .error ⟨"table.copy requires integer destination, source, and length operands"⟩
           | _, _, _, none, _ | _, _, _, _, none =>
@@ -1843,7 +1872,7 @@ private def stepPlainChecked?
       | .tableInit tableIndex elementIndex =>
         match thread.locals.values with
         | .i32 length :: .i32 source :: destination :: values =>
-          match destination.addrNat?, store.wasm.tables[tableIndex]?,
+          match destination.addrNat?, tableAt? store tableIndex,
               store.wasm.elementSegments[elementIndex]? with
           | some destination, some table, some segmentState =>
             let segmentValues :=
@@ -1856,9 +1885,7 @@ private def stepPlainChecked?
               let slice :=
                 (segmentValues.drop source.toNat).take length.toNat
               next { thread.locals with values }
-                (setTables store
-                  (listSetAt store.wasm.tables tableIndex
-                    (listWriteAt table destination slice)))
+                (setTableAt store tableIndex (listWriteAt table destination slice))
           | none, _, _ =>
             .error ⟨"table.init requires an integer destination operand"⟩
           | _, none, _ => .error ⟨s!"table index {tableIndex} is invalid"⟩
@@ -3687,7 +3714,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           store⟩
   | callIndirectUndefined
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : ¬elementIndex < table.length) :
       Step ⟨.running ⟨⟨params, localValues, selector :: values⟩,
           .callIndirect typeIndex tableIndex :: code,
@@ -3696,7 +3723,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .undefinedElement, store⟩
   | callIndirectUninitialized
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref none)) :
       Step ⟨.running ⟨⟨params, localValues, selector :: values⟩,
           .callIndirect typeIndex tableIndex :: code,
@@ -3705,7 +3732,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped (.uninitializedElement elementIndex), store⟩
   | callIndirectForeignTypeMismatch
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (hforeign : isForeignFunctionIndex
         store.runtime.currentModule.imports.length functionIndex = true)
@@ -3721,7 +3748,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .indirectCallTypeMismatch, store⟩
   | callIndirectForeignReturn
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (hforeign : isForeignFunctionIndex
         store.runtime.currentModule.imports.length functionIndex = true)
@@ -3744,7 +3771,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           { store with wasm }⟩
   | callIndirectForeignTrap
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (hforeign : isForeignFunctionIndex
         store.runtime.currentModule.imports.length functionIndex = true)
@@ -3763,7 +3790,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped (.host message), { store with wasm }⟩
   | callIndirectForeignThrow
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (hforeign : isForeignFunctionIndex
         store.runtime.currentModule.imports.length functionIndex = true)
@@ -3792,7 +3819,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           { store with wasm }⟩
   | callIndirectHostTypeMismatch
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -3808,7 +3835,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .indirectCallTypeMismatch, store⟩
   | callIndirectHostReturn
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -3830,7 +3857,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           { store with wasm }⟩
   | callIndirectHostTrap
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -3849,7 +3876,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped (.host message), { store with wasm }⟩
   | callIndirectHostThrow
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -3879,7 +3906,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           { store with wasm }⟩
   | callIndirectCrossInstanceTypeMismatch
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -3897,7 +3924,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .indirectCallTypeMismatch, store⟩
   | callIndirectCrossInstance
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -3927,7 +3954,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
             wasm := store.wasm }⟩
   | callIndirectTypeMismatch
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : ¬functionIndex < store.runtime.currentModule.imports.length)
       (hnotforeign : isForeignFunctionIndex
@@ -3945,7 +3972,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .indirectCallTypeMismatch, store⟩
   | callIndirect
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : ¬functionIndex < store.runtime.currentModule.imports.length)
       (hnotforeign : isForeignFunctionIndex
@@ -3972,7 +3999,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           store⟩
   | returnCallIndirectUndefined
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : ¬elementIndex < table.length) :
       Step ⟨.running ⟨⟨params, localValues, selector :: values⟩,
           .returnCallIndirect typeIndex tableIndex :: code,
@@ -3981,7 +4008,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .undefinedElement, store⟩
   | returnCallIndirectUninitialized
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref none)) :
       Step ⟨.running ⟨⟨params, localValues, selector :: values⟩,
           .returnCallIndirect typeIndex tableIndex :: code,
@@ -3990,7 +4017,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped (.uninitializedElement elementIndex), store⟩
   | returnCallIndirectHostTypeMismatch
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -4006,7 +4033,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .indirectCallTypeMismatch, store⟩
   | returnCallIndirectHostReturn
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -4028,7 +4055,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           { store with wasm }⟩
   | returnCallIndirectHostTrap
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -4047,7 +4074,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped (.host message), { store with wasm }⟩
   | returnCallIndirectHostThrow
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : functionIndex < store.runtime.currentModule.imports.length)
       (himport : store.runtime.currentModule.imports[functionIndex] = imp)
@@ -4077,7 +4104,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           { store with wasm }⟩
   | returnCallIndirectTypeMismatch
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : ¬functionIndex < store.runtime.currentModule.imports.length)
       (hfn : store.runtime.currentModule.funcs[
@@ -4093,7 +4120,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .indirectCallTypeMismatch, store⟩
   | returnCallIndirect
       (hselector : selector.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some (.funcref (some functionIndex)))
       (himports : ¬functionIndex < store.runtime.currentModule.imports.length)
       (hfn : store.runtime.currentModule.funcs[
@@ -4345,7 +4372,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           targetCode, arity, remainder, targetControl, calls⟩, store⟩
   | tableGetTrap
       (hindex : index.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : ¬elementIndex < table.length) :
       Step ⟨.running ⟨⟨params, localValues, index :: values⟩,
           .tableGet tableIndex :: code, arity, remainder, controls, calls⟩, store⟩
@@ -4353,7 +4380,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .outOfBoundsTable, store⟩
   | tableGet
       (hindex : index.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (helement : table[elementIndex]? = some value) :
       Step ⟨.running ⟨⟨params, localValues, index :: values⟩,
           .tableGet tableIndex :: code, arity, remainder, controls, calls⟩, store⟩
@@ -4361,7 +4388,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.running ⟨⟨params, localValues, value :: values⟩,
           code, arity, remainder, controls, calls⟩, store⟩
   | tableSize
-      (htable : store.wasm.tables[tableIndex]? = some table) :
+      (htable : tableAt? store tableIndex = some table) :
       Step ⟨.running ⟨⟨params, localValues, values⟩,
           .tableSize tableIndex :: code, arity, remainder, controls, calls⟩, store⟩
         (.instruction (.tableSize tableIndex))
@@ -4371,7 +4398,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
           code, arity, remainder, controls, calls⟩, store⟩
   | tableSetTrap
       (hindex : index.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : ¬elementIndex < table.length) :
       Step ⟨.running ⟨⟨params, localValues, value :: index :: values⟩,
           .tableSet tableIndex :: code, arity, remainder, controls, calls⟩, store⟩
@@ -4379,18 +4406,16 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .outOfBoundsTable, store⟩
   | tableSet
       (hindex : index.addrNat? = some elementIndex)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : elementIndex < table.length) :
       Step ⟨.running ⟨⟨params, localValues, value :: index :: values⟩,
           .tableSet tableIndex :: code, arity, remainder, controls, calls⟩, store⟩
         (.instruction (.tableSet tableIndex))
         ⟨.running ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-          setTables store
-            (listSetAt store.wasm.tables tableIndex
-              (listSetAt table elementIndex value))⟩
+          setTableAt store tableIndex (listSetAt table elementIndex value)⟩
   | tableGrow32
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : table.length + delta.toNat ≤
         store.runtime.currentModule.tableCap tableIndex) :
       Step ⟨.running ⟨⟨params, localValues,
@@ -4400,11 +4425,9 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.running ⟨⟨params, localValues,
             .i32 table.length.toUInt32 :: values⟩,
           code, arity, remainder, controls, calls⟩,
-          setTables store
-            (listSetAt store.wasm.tables tableIndex
-              (table ++ List.replicate delta.toNat initial))⟩
+          setTableAt store tableIndex (table ++ List.replicate delta.toNat initial)⟩
   | tableGrow32Failure
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : ¬table.length + delta.toNat ≤
         store.runtime.currentModule.tableCap tableIndex) :
       Step ⟨.running ⟨⟨params, localValues,
@@ -4415,7 +4438,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
             .i32 (0xFFFFFFFF : UInt32) :: values⟩,
           code, arity, remainder, controls, calls⟩, store⟩
   | tableGrow64
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : table.length + delta.toNat ≤
         store.runtime.currentModule.tableCap tableIndex) :
       Step ⟨.running ⟨⟨params, localValues,
@@ -4425,11 +4448,9 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.running ⟨⟨params, localValues,
             .i64 table.length.toUInt64 :: values⟩,
           code, arity, remainder, controls, calls⟩,
-          setTables store
-            (listSetAt store.wasm.tables tableIndex
-              (table ++ List.replicate delta.toNat initial))⟩
+          setTableAt store tableIndex (table ++ List.replicate delta.toNat initial)⟩
   | tableGrow64Failure
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : ¬table.length + delta.toNat ≤
         store.runtime.currentModule.tableCap tableIndex) :
       Step ⟨.running ⟨⟨params, localValues,
@@ -4442,7 +4463,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
   | tableFillTrap
       (hlength : length.addrNat? = some lengthNat)
       (hdestination : destination.addrNat? = some destinationNat)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : destinationNat + lengthNat > table.length) :
       Step ⟨.running ⟨⟨params, localValues,
           length :: value :: destination :: values⟩,
@@ -4452,7 +4473,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
   | tableFill
       (hlength : length.addrNat? = some lengthNat)
       (hdestination : destination.addrNat? = some destinationNat)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hbound : destinationNat + lengthNat ≤ table.length) :
       Step ⟨.running ⟨⟨params, localValues,
           length :: value :: destination :: values⟩,
@@ -4460,18 +4481,16 @@ inductive Step : Config α → StepKind → Config α → Prop where
         (.instruction (.tableFill tableIndex))
         ⟨.running ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-          setTables store
-            (listSetAt store.wasm.tables tableIndex
-              (listWriteAt table destinationNat
-                (List.replicate lengthNat value)))⟩
+          setTableAt store tableIndex (listWriteAt table destinationNat
+                (List.replicate lengthNat value))⟩
   | tableCopyTrap
       (hlength : length.addrNat? = some lengthNat)
       (hsource : source.addrNat? = some sourceNat)
       (hdestination : destination.addrNat? = some destinationNat)
       (hdestinationTable :
-        store.wasm.tables[destinationTableIndex]? = some destinationTable)
+        tableAt? store destinationTableIndex = some destinationTable)
       (hsourceTable :
-        store.wasm.tables[sourceTableIndex]? = some sourceTable)
+        tableAt? store sourceTableIndex = some sourceTable)
       (hbound : destinationNat + lengthNat > destinationTable.length ∨
         sourceNat + lengthNat > sourceTable.length) :
       Step ⟨.running ⟨⟨params, localValues,
@@ -4485,9 +4504,9 @@ inductive Step : Config α → StepKind → Config α → Prop where
       (hsource : source.addrNat? = some sourceNat)
       (hdestination : destination.addrNat? = some destinationNat)
       (hdestinationTable :
-        store.wasm.tables[destinationTableIndex]? = some destinationTable)
+        tableAt? store destinationTableIndex = some destinationTable)
       (hsourceTable :
-        store.wasm.tables[sourceTableIndex]? = some sourceTable)
+        tableAt? store sourceTableIndex = some sourceTable)
       (hdestinationBound :
         destinationNat + lengthNat ≤ destinationTable.length)
       (hsourceBound : sourceNat + lengthNat ≤ sourceTable.length) :
@@ -4498,13 +4517,11 @@ inductive Step : Config α → StepKind → Config α → Prop where
         (.instruction (.tableCopy destinationTableIndex sourceTableIndex))
         ⟨.running ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-          setTables store
-            (listSetAt store.wasm.tables destinationTableIndex
-              (listWriteAt destinationTable destinationNat
-                ((sourceTable.drop sourceNat).take lengthNat)))⟩
+          setTableAt store destinationTableIndex (listWriteAt destinationTable destinationNat
+                ((sourceTable.drop sourceNat).take lengthNat))⟩
   | tableInitTrap
       (hdestination : destination.addrNat? = some destinationNat)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hsegment :
         store.wasm.elementSegments[elementIndex]? = some segmentState)
       (hvalues : segmentValues =
@@ -4519,7 +4536,7 @@ inductive Step : Config α → StepKind → Config α → Prop where
         ⟨.trapped .outOfBoundsTable, store⟩
   | tableInit
       (hdestination : destination.addrNat? = some destinationNat)
-      (htable : store.wasm.tables[tableIndex]? = some table)
+      (htable : tableAt? store tableIndex = some table)
       (hsegment :
         store.wasm.elementSegments[elementIndex]? = some segmentState)
       (hvalues : segmentValues =
@@ -4534,10 +4551,8 @@ inductive Step : Config α → StepKind → Config α → Prop where
         (.instruction (.tableInit tableIndex elementIndex))
         ⟨.running ⟨⟨params, localValues, values⟩,
           code, arity, remainder, controls, calls⟩,
-          setTables store
-            (listSetAt store.wasm.tables tableIndex
-              (listWriteAt table destinationNat
-                ((segmentValues.drop source.toNat).take length.toNat)))⟩
+          setTableAt store tableIndex (listWriteAt table destinationNat
+                ((segmentValues.drop source.toNat).take length.toNat))⟩
   | elemDrop
       (hsegment : store.wasm.elementSegments[elementIndex]?.isSome = true) :
       Step ⟨.running ⟨locals,
@@ -6761,7 +6776,7 @@ by
   all_goals
     simp_all [stepChecked?, returnedValues, globalAt?, canonicalGlobalIndex,
       setGlobal, setMemory,
-      setDataSegments, setTables, setElementSegments,
+      setDataSegments, setTableAt, setTables, setElementSegments,
       Locals.get, Locals.set?] <;>
     omega
 
@@ -6932,7 +6947,7 @@ theorem table_step_store_frame {config config' : Config α} {kind}
     config'.store.wasm.exns = config.store.wasm.exns ∧
     config'.store.wasm.gcHeap = config.store.wasm.gcHeap ∧
     config'.store.wasm.host = config.store.wasm.host := by
-  cases h <;> simp_all [setTables]
+  cases h <;> simp_all [setTableAt, setTables]
 
 /-- Dropping an element segment changes only the segment-status array. -/
 theorem elem_drop_store_frame {config config' : Config α} {elementIndex}
