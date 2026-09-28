@@ -1185,18 +1185,38 @@ def Program.checkTypes
       | .drop => do
           let (_, next) ← state.popAny
           pure (some next)
-      | .select => do
+      | .select resultTypes => do
           let afterCondition ← state.popExpected m .i32
-          let (right, afterRight) ← afterCondition.popAny
-          let (left, afterLeft) ← afterRight.popAny
-          match left, right with
-          | some leftType, some rightType =>
-              if !m.vtCompat leftType rightType then throw "type mismatch"
-              pure (some { afterLeft with stack := some leftType :: afterLeft.stack })
-          | some valueType, none | none, some valueType =>
-              pure (some { afterLeft with stack := some valueType :: afterLeft.stack })
-          | none, none =>
-              pure (some { afterLeft with stack := none :: afterLeft.stack })
+          match resultTypes with
+          | some [selectType] =>
+              -- Typed `select t`: both operands and the result are `t`.
+              match selectType with
+              | .ref _ (.concrete index) =>
+                  if index ≥ m.types.length && index ≥ m.gcTypes.length then
+                    throw "unknown type"
+              | _ => pure ()
+              let afterOperands ←
+                afterCondition.applySig m ([selectType, selectType], [])
+              pure (some
+                { afterOperands with stack := some selectType :: afterOperands.stack })
+          | some _ => throw "invalid result arity"
+          | none =>
+              -- Untyped `select`: numeric or vector operands only. A reference
+              -- operand needs the typed form.
+              let (right, afterRight) ← afterCondition.popAny
+              let (left, afterLeft) ← afterRight.popAny
+              let isReference : CheckedType → Bool
+                | some valueType => valueType.reference?.isSome
+                | none => false
+              if isReference left || isReference right then throw "type mismatch"
+              match left, right with
+              | some leftType, some rightType =>
+                  if !m.vtCompat leftType rightType then throw "type mismatch"
+                  pure (some { afterLeft with stack := some leftType :: afterLeft.stack })
+              | some valueType, none | none, some valueType =>
+                  pure (some { afterLeft with stack := some valueType :: afterLeft.stack })
+              | none, none =>
+                  pure (some { afterLeft with stack := none :: afterLeft.stack })
       | .refIsNull => do
           let (referenceType, next) ← state.popAny
           if !checkedIsRef referenceType then throw "type mismatch"

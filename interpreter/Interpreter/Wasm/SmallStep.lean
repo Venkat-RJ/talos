@@ -1878,7 +1878,7 @@ private def stepPlainChecked?
         match thread.locals.values with
         | _ :: values => next { thread.locals with values }
         | _ => .error ⟨"drop requires one operand"⟩
-      | .select =>
+      | .select _ =>
         match thread.locals.values with
         | .i32 condition :: second :: first :: values =>
           next { thread.locals with
@@ -4855,8 +4855,8 @@ inductive Step : Config α → StepKind → Config α → Prop where
       (h : selected = if condition ≠ 0 then first else second) :
       Step ⟨.running
           ⟨⟨params, localValues, .i32 condition :: second :: first :: values⟩,
-            .select :: code, arity, remainder, controls, calls⟩, store⟩
-        (.instruction .select)
+            .select resultTypes :: code, arity, remainder, controls, calls⟩, store⟩
+        (.instruction (.select resultTypes))
         ⟨.running
           ⟨⟨params, localValues, selected :: values⟩,
             code, arity, remainder, controls, calls⟩, store⟩

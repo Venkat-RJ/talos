@@ -24,6 +24,47 @@ namespace Wasm.Examples.SmallStep
 
 open Wasm.SmallStep
 
+/-! ### `select` result annotations
+
+The untyped `select` accepts only numeric and vector operands; a reference
+operand needs `select (result t)`, whose single type must name a declared
+type. Mirrors `select.wast:384-398` and `ref.wast:78`. -/
+
+def invalidImplicitSelectOnFuncrefValidationModule : Module :=
+  { funcs :=
+      [{ params := [.funcref],
+         body := [.localGet 0, .localGet 0, .const 1, .select, .drop] }] }
+
+def invalidImplicitSelectOnExternrefValidationModule : Module :=
+  { funcs :=
+      [{ params := [.externref],
+         body := [.localGet 0, .localGet 0, .const 1, .select, .drop] }] }
+
+def validTypedSelectOnFuncrefValidationModule : Module :=
+  { funcs :=
+      [{ params := [.funcref],
+         body := [.localGet 0, .localGet 0, .const 1, .select (some [.funcref])],
+         results := [.funcref] }] }
+
+def invalidTypedSelectUnknownTypeValidationModule : Module :=
+  { funcs :=
+      [{ body := [.unreachable, .select (some [.ref false (.concrete 1)]), .drop] }] }
+
+def invalidTypedSelectNoResultValidationModule : Module :=
+  { funcs := [{ body := [.nop, .nop, .const 1, .select (some [])] }] }
+
+def invalidTypedSelectTwoResultsValidationModule : Module :=
+  { funcs :=
+      [{ body := [.const 1, .const 2, .const 1, .select (some [.i32, .i32])],
+         results := [.i32, .i32] }] }
+
+def validTypedSelectAfterUnreachableValidationModule : Module :=
+  { funcs := [{ body := [.unreachable, .select (some [.i32])], results := [.i32] }] }
+
+def validUntypedSelectNumericValidationModule : Module :=
+  { funcs :=
+      [{ body := [.const 1, .const 2, .const 0, .select], results := [.i32] }] }
+
 def invalidDataDropModule : Module :=
   { funcs := [{ body := [.dataDrop 0] }] }
 
@@ -578,6 +619,35 @@ theorem validator_accepts_nonnull_element_for_nullable_table :
 
 theorem validator_accepts_br_on_non_null_refinement :
     validationSucceeds brOnNonNullRefinementValidationModule = true := by cbv
+
+theorem validator_rejects_implicit_select_on_funcref :
+    validationErrorIs invalidImplicitSelectOnFuncrefValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_rejects_implicit_select_on_externref :
+    validationErrorIs invalidImplicitSelectOnExternrefValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_typed_select_on_funcref :
+    validationSucceeds validTypedSelectOnFuncrefValidationModule = true := by decide +kernel
+
+theorem validator_rejects_typed_select_unknown_type :
+    validationErrorIs invalidTypedSelectUnknownTypeValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_rejects_typed_select_without_result :
+    validationErrorIs invalidTypedSelectNoResultValidationModule
+      "invalid result arity" = true := by decide +kernel
+
+theorem validator_rejects_typed_select_with_two_results :
+    validationErrorIs invalidTypedSelectTwoResultsValidationModule
+      "invalid result arity" = true := by decide +kernel
+
+theorem validator_accepts_typed_select_after_unreachable :
+    validationSucceeds validTypedSelectAfterUnreachableValidationModule = true := by decide +kernel
+
+theorem validator_accepts_untyped_numeric_select :
+    validationSucceeds validUntypedSelectNumericValidationModule = true := by decide +kernel
 
 theorem validator_rejects_unknown_data_drop :
     validationErrorIs invalidDataDropModule "unknown data segment" = true := by decide +kernel

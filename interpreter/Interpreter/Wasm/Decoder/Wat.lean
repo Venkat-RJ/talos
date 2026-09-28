@@ -1459,10 +1459,13 @@ private def parseInstr (ctx : Ctx) (toks : List Sexpr)
     | "table.init"  => parseTableInit ctx rest
     | "elem.drop"   => parseImmediateNat (resolveNamed ctx.elemNames "elem") .elemDrop op rest
     | "select"    =>
-      let rec dropResults : List Sexpr → List Sexpr
-        | .list (.atom "result" :: _) :: r => dropResults r
-        | xs => xs
-      .ok ([.select], dropResults rest)
+      -- `select (result t)*` keeps its annotation so validation can check
+      -- the typed form; plain `select` decodes to `.select none`.
+      let annotated := match rest with
+        | .list (.atom "result" :: _) :: _ => true
+        | _ => false
+      let (_, rs, rest') := skipBlockType ctx.resolveBlockType [] [] rest
+      .ok ([.select (if annotated then some rs else none)], rest')
     | "block"     =>
       parseStructured ctx
         (fun ps rs body => .block ps.length rs.length body ps rs)
@@ -1772,11 +1775,12 @@ partial_fixpoint
 
 private def foldedSelect (ctx : Ctx) (xs : List Sexpr)
     : Except Err (List Wasm.Instruction) := do
-  let xs' := xs.filter fun
-    | .list (.atom "result" :: _) => false
-    | _ => true
+  let annotated := xs.any fun
+    | .list (.atom "result" :: _) => true
+    | _ => false
+  let (_, rs, xs') := skipBlockType ctx.resolveBlockType [] [] xs
   let acc ← foldedOperands ctx "folded select" xs'
-  .ok (acc ++ [.select])
+  .ok (acc ++ [.select (if annotated then some rs else none)])
 partial_fixpoint
 
 private def parseLocalTee (ctx : Ctx) (toks : List Sexpr)

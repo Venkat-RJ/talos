@@ -31266,7 +31266,7 @@ ref.wast:60 assert_invalid skipped:assert_invalid: not rejected
 ref.wast:65 assert_invalid skipped:assert_invalid: not rejected
 ref.wast:69 assert_invalid skipped:assert_invalid: not rejected
 ref.wast:73 assert_invalid pass
-ref.wast:78 assert_invalid skipped:assert_invalid: not rejected
+ref.wast:78 assert_invalid pass
 ref_as_non_null.wast:1 module pass
 ref_as_non_null.wast:25 assert_trap pass
 ref_as_non_null.wast:27 assert_trap pass
@@ -32008,9 +32008,9 @@ select.wast:361 assert_return pass
 select.wast:364 assert_invalid pass
 select.wast:368 assert_invalid pass
 select.wast:372 assert_invalid pass
-select.wast:384 assert_invalid skipped:assert_invalid: not rejected
-select.wast:392 assert_invalid skipped:assert_invalid: not rejected
-select.wast:398 assert_invalid skipped:assert_invalid: not rejected
+select.wast:384 assert_invalid pass
+select.wast:392 assert_invalid pass
+select.wast:398 assert_invalid pass
 select.wast:403 module pass
 select.wast:408 assert_invalid pass
 select.wast:414 assert_invalid pass
