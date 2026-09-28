@@ -1504,8 +1504,84 @@ def Module.checkConstProgram
         if (m.funcSig? functionIndex).isNone then throw "unknown function"
     | _ => pure ()
 
+/-! ### Type indices written in value types
+
+`Instruction.gcTypeRefs` covers the type indices in GC instruction immediates.
+A concrete type index can also appear inside a value type: function and tag
+signatures, imports, parameters, locals, results, globals, table element types,
+element segments, block types, and static null-reference types. Each must name
+a declared type. -/
+
+/-- Whether `index` names a declared type. The function-type table and the GC
+type table share one index space; decoded modules fill both, hand-built modules
+may fill either. -/
+def Module.typeIndexKnown (m : Module) (index : Nat) : Bool :=
+  index < m.types.length || index < m.gcTypes.length
+
+/-- The type index a value type refers to, when it is a concrete reference. -/
+def ValueType.concreteTypeRef? : ValueType → Option Nat
+  | .ref _ (.concrete index) => some index
+  | _ => none
+
+def Module.checkValueTypeRef (m : Module) (valueType : ValueType) :
+    Except String Unit :=
+  match valueType.concreteTypeRef? with
+  | some index => if m.typeIndexKnown index then .ok () else .error "unknown type"
+  | none => .ok ()
+
+def Module.checkValueTypeRefs (m : Module) (valueTypes : List ValueType) :
+    Except String Unit := do
+  for valueType in valueTypes do
+    m.checkValueTypeRef valueType
+
+/-- The value types written in an instruction's immediates: block types and
+static null-reference types. -/
+def Instruction.valueTypeRefs : Instruction → List ValueType
+  | .block _ _ _ paramTypes resultTypes
+  | .loop _ _ _ paramTypes resultTypes
+  | .iff _ _ _ _ paramTypes resultTypes
+  | .tryTable _ _ _ _ paramTypes resultTypes => paramTypes ++ resultTypes
+  | .refNull staticType | .refNullExtern staticType | .refNullExn staticType
+  | .gc (.refNullAny staticType) => [staticType]
+  | _ => []
+
+/-- The value types written in a GC type definition. -/
+def GcTypeDef.valueTypes (td : GcTypeDef) : List ValueType :=
+  match td.comp with
+  | .func signature => signature.params ++ signature.results
+  | .struct fields => fields.map (·.storage.vt)
+  | .array elem => [elem.storage.vt]
+
+/-- Every concrete type index written in a declared value type must name a
+type. -/
+def Module.checkValueTypeIndices (m : Module) : Except String Unit := do
+  for signature in m.types ++ m.tags do
+    m.checkValueTypeRefs (signature.params ++ signature.results)
+  for td in m.gcTypes do
+    m.checkValueTypeRefs td.valueTypes
+  for imp in m.imports do
+    m.checkValueTypeRefs (imp.params ++ imp.results)
+  for f in m.funcs do
+    m.checkValueTypeRefs (f.params ++ f.locals ++ f.results)
+    for instruction in f.body.allInstrs do
+      m.checkValueTypeRefs instruction.valueTypeRefs
+  for global in m.globals do
+    m.checkValueTypeRef global.valueType
+    for instruction in (global.sourceInit.getD []).allInstrs do
+      m.checkValueTypeRefs instruction.valueTypeRefs
+  for table in m.tables do
+    m.checkValueTypeRef table.elemType
+  for segment in m.elements do
+    match segment.elemType with
+    | some elemType => m.checkValueTypeRef elemType
+    | none => pure ()
+    for expression in segment.exprs ++ [segment.offsetExpr] do
+      for instruction in expression.allInstrs do
+        m.checkValueTypeRefs instruction.valueTypeRefs
+
 /-- Run the partial structural validator. `throw` on the first violation. -/
 def Module.validate (m : Module) : Except String Unit := do
+  m.checkValueTypeIndices
   m.checkInterface
   if m.dataWithoutMemory then throw "unknown memory"
   match m.memory with
