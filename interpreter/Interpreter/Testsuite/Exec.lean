@@ -163,6 +163,12 @@ private def parseValueAt (ty val : String) : Except String Value :=
     | _ => match val.toNat? with
       | some n => .ok (.funcref (some n))
       | none   => .error s!"unparseable funcref value `{val}`"
+  | "exnref" =>
+    match val with
+    | "null" => .ok (.exnref none)
+    | _ => match val.toNat? with
+      | some n => .ok (.exnref (some n))
+      | none   => .error s!"unparseable exnref value `{val}`"
   | "anyref" =>
     match val with
     | "null" => .ok (.anyref none)
@@ -269,6 +275,12 @@ private inductive ExpectedVal where
   only pins the reference's *kind*, so any live reference of the right
   shape matches (and `nullref` matches the managed null). -/
   | gcRef (kind : String)
+  /-- A non-GC reference expectation without a payload. `funcref` /
+  `externref` / `exnref` (`(ref.func)`, `(ref.extern)`, `(ref.exn)`) match
+  any non-null reference of that kind; `refnull` (untyped `(ref.null)`)
+  matches the null of any kind; `nullfuncref` / `nullexternref` /
+  `nullexnref` (bottom types) match the null of their hierarchy. -/
+  | refKind (kind : String)
 deriving Repr, Inhabited
 
 private partial def ExpectedVal.matches : ExpectedVal → Value → Bool
@@ -279,6 +291,16 @@ private partial def ExpectedVal.matches : ExpectedVal → Value → Bool
     ps.length = 128 / bits &&
     (List.zip ps (Wasm.Simd.toLanes bits v)).all fun (p, n) => p.matches n
   | .either alts, v => alts.any (·.matches v)
+  | .refKind kind, v => match kind, v with
+    | "funcref", .funcref (some _)     => true
+    | "externref", .externref (some _) => true
+    | "exnref", .exnref (some _)       => true
+    | "nullfuncref", .funcref none     => true
+    | "nullexternref", .externref none => true
+    | "nullexnref", .exnref none       => true
+    | "refnull", .funcref none | "refnull", .externref none
+    | "refnull", .exnref none | "refnull", .anyref none => true
+    | _, _                             => false
   | .gcRef kind, v => match kind, v with
     | "nullref", .anyref none      => true
     | "nullref", _                 => false
@@ -319,6 +341,12 @@ private partial def parseExpectedValue (j : Json) : Except String ExpectedVal :=
     | some val => ExpectedVal.f64Pat <$> lanePatOf 64 val
     | none => .error "value missing type/value"
   | some ty =>
+    if ty == "refnull" || ty == "nullfuncref" || ty == "nullexternref"
+       || ty == "nullexnref" then
+      return .refKind ty
+    if (ty == "funcref" || ty == "externref" || ty == "exnref")
+       && (jstr? j "value").isNone then
+      return .refKind ty
     -- GC managed-reference result types (GC proposal). `wast2json` encodes
     -- these with no `value` (any ref of the kind), `"null"`, or — for i31 —
     -- a concrete scalar.
@@ -1001,6 +1029,7 @@ private partial def renderExpected : ExpectedVal → String
   | .either alts =>
     "either(" ++ String.intercalate " | " (alts.map renderExpected) ++ ")"
   | .gcRef kind => s!"<any {kind}>"
+  | .refKind kind => kind
 
 private def renderExpecteds (es : List ExpectedVal) : String :=
   "[" ++ String.intercalate ", " (es.map renderExpected) ++ "]"
