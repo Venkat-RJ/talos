@@ -851,7 +851,10 @@ private def parsePlainOp (rejectUnsupported : Bool) : String → Except Err Wasm
        || startsWith op "struct." || startsWith op "array." || startsWith op "i31."
        || startsWith op "br_on_" || startsWith op "extern."
        || op == "throw" || op == "throw_ref" || op == "rethrow" || op == "try"
-       || op == "try_table" || op == "catch" || op == "catch_all" || op == "delegate"
+       -- `catch` / `catch_all` are `try_table` clause heads, parsed there;
+       -- as bare instructions they are malformed (try_table.wast:367/372),
+       -- so they are deliberately absent from this tolerant list.
+       || op == "try_table" || op == "delegate"
        || op == "return_call" || op == "return_call_indirect" || op == "return_call_ref"
        || op == "call_ref" || op == "any.convert_extern"
        || op == "memory.atomic.notify" || startsWith op "memory.atomic."

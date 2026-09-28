@@ -63973,7 +63973,7 @@ try_table.wast:339 assert_return pass
 try_table.wast:340 assert_return pass
 try_table.wast:342 module pass
 try_table.wast:364 assert_return pass
-try_table.wast:367 assert_malformed skipped:assert_malformed: not rejected
+try_table.wast:367 assert_malformed pass
 try_table.wast:372 assert_malformed pass
 try_table.wast:376 module pass
 try_table.wast:387 assert_invalid pass
