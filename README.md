@@ -56,7 +56,7 @@ lake exe runner samples/trap.wat div_by_zero          # trap: integer divide by 
 lake exe runner --fuel 5 samples/factorial.wat fact 5  # out of fuel                    (exit 2)
 ```
 
-Exit codes: `0` success, `1` trap, `2` out of fuel, `3` any other error (bad arguments, unknown export, decode failure). Note that `i32` arithmetic wraps modulo 2^32: `fact 13` prints `1932053504`, not 13!.
+Exit codes: `0` success, `1` trap, `2` out of fuel, `3` any other error (bad arguments, unknown export, decode failure). Note that `i32` arithmetic wraps modulo 2^32: `fact 13` prints `1932053504`, not 13! (6227020800).
 
 See [`interpreter/samples/`](interpreter/samples/) for the example modules and `lake exe runner --help` for the full CLI.
 
