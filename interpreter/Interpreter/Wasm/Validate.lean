@@ -63,8 +63,10 @@ def Instruction.gcTypeRefs : Instruction → List Nat
     | .arrayNewElem t _ | .arrayInitElem t _ => [t]
     | .structGet t _ | .structGetS t _ | .structGetU t _ | .structSet t _ => [t]
     | .arrayCopy a b => [a, b]
-    | .refTest _ (.concrete t) | .refCast _ (.concrete t)
-    | .brOnCast _ _ (.concrete t) | .brOnCastFail _ _ (.concrete t) => [t]
+    | .refTest _ (.concrete t) | .refCast _ (.concrete t) => [t]
+    | .brOnCast _ _ ht source | .brOnCastFail _ _ ht source =>
+        (match ht with | .concrete t => [t] | _ => []) ++
+        (match source with | some (.ref _ (.concrete t)) => [t] | _ => [])
     | _ => []
   | _ => []
 
@@ -685,7 +687,7 @@ def Program.checkBranchDepth
     | .brTable targets defaultTarget =>
         if defaultTarget > labels || targets.any (· > labels) then
           throw "unknown label"
-    | .gc (.brOnCast depth _ _) | .gc (.brOnCastFail depth _ _) =>
+    | .gc (.brOnCast depth _ _ _) | .gc (.brOnCastFail depth _ _ _) =>
         if depth > labels then throw "unknown label"
     | _ => pure ()
 termination_by sizeOf program
@@ -1169,6 +1171,82 @@ def Instruction.straightSig (m : Module) (locals : List ValueType)
       (operation.scalarMemorySig addressType).orElse fun _ =>
         operation.simdMemorySig addressType
 
+/-! ### Reference casts
+
+`ref.test`, `ref.cast`, `br_on_cast` and `br_on_cast_fail` (GC proposal). The
+operand must be a reference in the same type hierarchy as the target type
+(`any`, `func`, `extern` or `exn`). `br_on_cast l rt1 rt2` additionally requires
+`rt2 <: rt1`, a label that accepts the branched value, and types the
+fall-through operand as `rt1 \ rt2` (`rt1` without null when `rt2` admits
+null). -/
+
+/-- The top of a heap type's hierarchy. -/
+def Module.heapTop (m : Module) (heap : GcHeapType) : GcHeapType :=
+  match m.resolveHeapType heap with
+  | .func | .noFunc => .func
+  | .extern | .noExtern => .extern
+  | .exn | .noExn => .exn
+  | .concrete index =>
+      match m.gcComposite? index with
+      | some (.func _) => .func
+      | _ => .any
+  | _ => .any
+
+/-- Whether a cast operand is a reference in the target type's hierarchy. A
+polymorphic operand after `unreachable` is accepted. -/
+def Module.castOperandMatches (m : Module) (operand : CheckedType)
+    (targetHeap : GcHeapType) : Bool :=
+  match operand with
+  | none => true
+  | some valueType =>
+      match valueType.reference? with
+      | some (_, heap) => m.heapTop heap == m.heapTop targetHeap
+      | none => false
+
+/-- `rt1 \ rt2`: the source type minus the values matched by the target. Only
+nullability can be subtracted statically. -/
+def ValueType.castDifference (source target : ValueType) : ValueType :=
+  match source.reference?, target.reference? with
+  | some (sourceNullable, sourceHeap), some (targetNullable, _) =>
+      .ref (sourceNullable && !targetNullable) sourceHeap
+  | _, _ => source
+
+/-- Type `br_on_cast` (`fail := false`) or `br_on_cast_fail` (`fail := true`).
+The operand stays on the stack in both outcomes: the branch carries the
+matched type (`rt2`, or `rt1 \ rt2` for the fail form) and the fall-through
+keeps the other. -/
+def Module.checkBrOnCast (m : Module) (state : CheckState) (labels : List LabelType)
+    (depth : Nat) (nullable : Bool) (heap : GcHeapType) (source : Option ValueType)
+    (fail : Bool) : Except String CheckState := do
+  let target : ValueType := .ref nullable heap
+  let (operand, afterOperand) ← match source with
+    | some sourceType => do
+        if !m.vtCompat target sourceType then throw "type mismatch"
+        let next ← state.popExpected m sourceType
+        pure (some sourceType, next)
+    | none => do
+        let (operand, next) ← state.popAny
+        if !m.castOperandMatches operand heap then throw "type mismatch"
+        pure (operand, next)
+  let sourceType : ValueType := (operand.getD (.ref true (m.heapTop heap)))
+  let branched : ValueType := if fail then sourceType.castDifference target else target
+  let fallthrough : ValueType := if fail then target else sourceType.castDifference target
+  let some (arity, types?) := labels[depth]?
+    | throw "unknown label"
+  -- The label consumes `[t* rt']`. On fall-through the operands below the
+  -- reference keep only the label's types `t*` (WebAssembly/gc#516), exactly as
+  -- for `br_on_null`.
+  let branchState : CheckState :=
+    { afterOperand with stack := some branched :: afterOperand.stack }
+  let below ← match types? with
+    | some types =>
+        let rest ← branchState.applySig m (types.reverse, [])
+        pure { rest with stack := (types.dropLast.reverse.map some) ++ rest.stack }
+    | none =>
+        let (arguments, rest) ← branchState.popAnyN arity
+        pure { rest with stack := arguments.drop 1 ++ rest.stack }
+  return { below with stack := some fallthrough :: below.stack }
+
 /-- Recursively check a program. `none` means an unsupported instruction was
 encountered, so callers conservatively accept the whole function. -/
 def Program.checkTypes
@@ -1465,6 +1543,18 @@ def Program.checkTypes
               stack := []
               unreachable := true
               transfers := 0 :: next.transfers })
+      | .gc (.refTest _ heap) => do
+          let (operand, next) ← state.popAny
+          if !m.castOperandMatches operand heap then throw "type mismatch"
+          pure (some { next with stack := some .i32 :: next.stack })
+      | .gc (.refCast nullable heap) => do
+          let (operand, next) ← state.popAny
+          if !m.castOperandMatches operand heap then throw "type mismatch"
+          pure (some { next with stack := some (.ref nullable heap) :: next.stack })
+      | .gc (.brOnCast depth nullable heap source) =>
+          some <$> m.checkBrOnCast state labels depth nullable heap source false
+      | .gc (.brOnCastFail depth nullable heap source) =>
+          some <$> m.checkBrOnCast state labels depth nullable heap source true
       | _ =>
           match instruction.straightSig m locals with
           | none => pure none
