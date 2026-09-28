@@ -26,10 +26,18 @@ Proofs in Talos are built on **weakest precondition (WP) calculus** — a [predi
 
 ## Quick start
 
-**Run a `.wat` module:**
+**Clone and build the interpreter** (the Wasm spec testsuite is a git submodule, and `lake exe cache get` downloads prebuilt Mathlib instead of compiling it from source):
 
 ```
-cd interpreter
+git clone --recurse-submodules https://github.com/cajal-technologies/talos.git
+cd talos/interpreter
+lake exe cache get
+lake build
+```
+
+**Run a `.wat` module** (still in `interpreter/`):
+
+```
 lake exe runner samples/factorial.wat fact 5
 ```
 
@@ -41,7 +49,16 @@ Output: `120`
 lake exe runner --fuel 10000 samples/factorial.wat fact 5
 ```
 
-See [`interpreter/samples/factorial.wat`](interpreter/samples/factorial.wat) for a minimal example module.
+**Traps and exit codes.** A trap is specified Wasm behaviour, not an interpreter failure. The runner reports it on stderr and exits non-zero:
+
+```
+lake exe runner samples/trap.wat div_by_zero          # trap: integer divide by zero   (exit 1)
+lake exe runner --fuel 5 samples/factorial.wat fact 5  # out of fuel                    (exit 2)
+```
+
+Exit codes: `0` success, `1` trap, `2` out of fuel, `3` any other error (bad arguments, unknown export, decode failure). Note that `i32` arithmetic wraps modulo 2^32: `fact 13` prints `1932053504`, not 13!.
+
+See [`interpreter/samples/`](interpreter/samples/) for the example modules and `lake exe runner --help` for the full CLI.
 
 **Prove something about it:**
 
@@ -89,10 +106,12 @@ just build   # builds interpreter → codelib → programs in order
 Or build a single package:
 
 ```bash
-cd interpreter  && lake build
-cd codelib      && lake build
+cd interpreter   && lake exe cache get && lake build   # cache get: once, fetches prebuilt Mathlib
+cd codelib       && lake build
 cd programs/lean && lake build
 ```
+
+`just build` runs the cache step for you.
 
 Dependencies:
 
