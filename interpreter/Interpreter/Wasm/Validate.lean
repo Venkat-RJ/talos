@@ -1189,7 +1189,11 @@ def Module.heapTop (m : Module) (heap : GcHeapType) : GcHeapType :=
   | .concrete index =>
       match m.gcComposite? index with
       | some (.func _) => .func
-      | _ => .any
+      | some _ => .any
+      -- Unreachable from `Module.validate` (the GC type-reference check
+      -- rejects indices outside `gcTypes` first); kept so the function is
+      -- total and consistent with `Module.typeIndexKnown` for direct callers.
+      | none => if (m.types[index]?).isSome then .func else .any
   | _ => .any
 
 /-- Whether a cast operand is a reference in the target type's hierarchy. A
