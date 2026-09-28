@@ -1504,6 +1504,21 @@ def Module.checkConstProgram
         if (m.funcSig? functionIndex).isNone then throw "unknown function"
     | _ => pure ()
 
+/-- A table declaration: the minimum size may not exceed the maximum, and the
+element type must have a default value. A non-nullable element type is only
+valid together with an initializer expression, which `TableDecl` does not
+model (the decoder rejects that syntax), so such a table cannot be
+instantiated and is rejected here. -/
+def TableDecl.checkDeclaration (table : TableDecl) : Except String Unit := do
+  match table.max with
+  | some maximum =>
+      if table.min > maximum then
+        throw "size minimum must not be greater than maximum"
+  | none => pure ()
+  match table.elemType with
+  | .ref false _ => throw "type mismatch"
+  | _ => pure ()
+
 /-- Run the partial structural validator. `throw` on the first violation. -/
 def Module.validate (m : Module) : Except String Unit := do
   m.checkInterface
@@ -1639,5 +1654,8 @@ def Module.validate (m : Module) : Except String Unit := do
   for f in m.funcs do
     Program.checkBranchDepth 0 f.body
     m.checkFuncStraight f
+  -- 5. Table declarations: limits and a defaultable element type.
+  for table in m.tables do
+    table.checkDeclaration
 
 end Wasm

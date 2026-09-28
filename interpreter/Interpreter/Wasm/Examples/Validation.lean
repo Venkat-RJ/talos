@@ -42,6 +42,34 @@ def validMemoryInit64ValidationModule : Module :=
         is64 := true
         data := [{ offset := none, bytes := [1] }] } }
 
+/-! ### Table declarations
+
+Reversed limits (`table.wast:27/31`, `table64.wast:16/20`) and a non-nullable
+element type without an initializer (`table.wast:71-136`). -/
+
+def invalidNonNullableTableElementValidationModule : Module :=
+  { funcs := [], tables := [{ min := 0, elemType := .ref false .func }] }
+
+def invalidNonNullableConcreteTableElementValidationModule : Module :=
+  { funcs := [], types := [{}],
+    tables := [{ min := 10, elemType := .ref false (.concrete 0) }] }
+
+def validNullableConcreteTableElementValidationModule : Module :=
+  { funcs := [], types := [{}],
+    tables := [{ min := 10, elemType := .ref true (.concrete 0) }] }
+
+def invalidReversedTableLimitsValidationModule : Module :=
+  { funcs := [], tables := [{ min := 1, max := some 0 }] }
+
+def invalidReversedTable64LimitsValidationModule : Module :=
+  { funcs := [], tables := [{ min := 0xffff_ffff, max := some 0, is64 := true }] }
+
+def validEqualTableLimitsValidationModule : Module :=
+  { funcs := [], tables := [{ min := 3, max := some 3 }] }
+
+def validUnboundedTableValidationModule : Module :=
+  { funcs := [], tables := [{ min := 0xffff_ffff }] }
+
 def invalidMemoryFillWithoutMemoryModule : Module :=
   { funcs := [{ body := [.const 0, .const 0, .const 0, .memoryFill] }] }
 
@@ -588,6 +616,31 @@ theorem validator_rejects_unknown_memory_init_segment :
 
 theorem validator_accepts_typed_memory64_init :
     validationSucceeds validMemoryInit64ValidationModule = true := by decide +kernel
+
+theorem validator_rejects_non_nullable_table_element :
+    validationErrorIs invalidNonNullableTableElementValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_rejects_non_nullable_concrete_table_element :
+    validationErrorIs invalidNonNullableConcreteTableElementValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_nullable_concrete_table_element :
+    validationSucceeds validNullableConcreteTableElementValidationModule = true := by decide +kernel
+
+theorem validator_rejects_reversed_table_limits :
+    validationErrorIs invalidReversedTableLimitsValidationModule
+      "size minimum must not be greater than maximum" = true := by decide +kernel
+
+theorem validator_rejects_reversed_table64_limits :
+    validationErrorIs invalidReversedTable64LimitsValidationModule
+      "size minimum must not be greater than maximum" = true := by decide +kernel
+
+theorem validator_accepts_equal_table_limits :
+    validationSucceeds validEqualTableLimitsValidationModule = true := by decide +kernel
+
+theorem validator_accepts_unbounded_table :
+    validationSucceeds validUnboundedTableValidationModule = true := by decide +kernel
 
 theorem validator_rejects_memory_fill_without_memory :
     validationErrorIs invalidMemoryFillWithoutMemoryModule
