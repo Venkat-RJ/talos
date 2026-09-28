@@ -18961,7 +18961,7 @@ instance.wast:125 module_instance pass
 instance.wast:126 register pass
 instance.wast:128 module pass
 instance.wast:167 assert_return pass
-instance.wast:168 assert_return fail
+instance.wast:168 assert_return pass
 instance.wast:169 assert_return pass
 instance.wast:170 assert_return pass
 int_exprs.wast:6 module pass

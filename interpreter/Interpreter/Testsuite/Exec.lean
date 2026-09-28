@@ -937,7 +937,10 @@ private def commitStore (sst : ScriptState) (m : Wasm.Module)
         memories := memories.set! id (memory, store.memoryCap m index)
     | none => pure ()
   for (id, index) in store.tableIds.zipIdx do
-    match store.tables[index]? with
+    -- Aliased indices were remapped to their first occurrence at
+    -- instantiation, so that slot holds the truth; commit from it.
+    let canonical := (store.tableIds.findIdx? (· = id)).getD index
+    match store.tables[canonical]? with
     | some table =>
       if id < tables.size then
         tables := tables.set! id
@@ -1145,6 +1148,53 @@ def parseInvokeAction (j : Json) : Except String (Option String × String × Lis
 
 /-! ## Per-file driver -/
 
+/-! ## Table alias resolution
+
+A module may import the same table twice, or import two names that its
+exporter gave one table (`instance.wast:128-168`). Execution indexes
+`Store.tables` by local index, so two local slots for one shared table would
+diverge within a single call. Resolve the alias at instantiation: rewrite every
+table index in the module to the first local index carrying the same stable
+identity. The alias slot stays in the store (the index space is unchanged) but
+nothing references it. Memories and globals resolve aliases inside the machine
+(`canonicalMemoryIndex`, `canonicalGlobalIndex`); doing the same for tables
+is a design decision for the separation-logic layer, so this stays in the
+harness. -/
+
+private def canonicalTableMap (tableIds : List Nat) (index : Nat) : Nat :=
+  match tableIds[index]? with
+  | some id => (tableIds.findIdx? (· = id)).getD index
+  | none => index
+
+private partial def remapProgram (canon : Nat → Nat) : Wasm.Program → Wasm.Program
+  | [] => []
+  | i :: rest =>
+    let i' : Wasm.Instruction := match i with
+      | .block pa ra body pts rts => .block pa ra (remapProgram canon body) pts rts
+      | .loop pa ra body pts rts => .loop pa ra (remapProgram canon body) pts rts
+      | .iff pa ra thn els pts rts =>
+          .iff pa ra (remapProgram canon thn) (remapProgram canon els) pts rts
+      | .tryTable pa ra cs body pts rts =>
+          .tryTable pa ra cs (remapProgram canon body) pts rts
+      | .tableGet t => .tableGet (canon t)
+      | .tableSet t => .tableSet (canon t)
+      | .tableSize t => .tableSize (canon t)
+      | .tableGrow t => .tableGrow (canon t)
+      | .tableFill t => .tableFill (canon t)
+      | .tableCopy d s => .tableCopy (canon d) (canon s)
+      | .tableInit t e => .tableInit (canon t) e
+      | .callIndirect ty t => .callIndirect ty (canon t)
+      | .returnCallIndirect ty t => .returnCallIndirect ty (canon t)
+      | other => other
+    i' :: remapProgram canon rest
+
+private def remapTableIndices (canon : Nat → Nat) (m : Wasm.Module) : Wasm.Module :=
+  { m with
+    funcs := m.funcs.map fun f => { f with body := remapProgram canon f.body }
+    elements := m.elements.map fun segment =>
+      { segment with tableIdx := segment.tableIdx.map canon }
+    tableExports := m.tableExports.map fun (name, index) => (name, canon index) }
+
 private def instantiateModule (st : ScriptState) (m : Wasm.Module) (fuel : Nat) :
     ModuleSlot × Array Wasm.Value × Array Unit × Array (Wasm.HostFn Unit) ×
       Array (Wasm.Mem × Nat) × Array (Wasm.TableInst × Nat) :=
@@ -1156,6 +1206,7 @@ private def instantiateModule (st : ScriptState) (m : Wasm.Module) (fuel : Nat) 
   let functionState := { st with sharedFunctions := sharedFunctions }
   let (store0, sharedMemories, sharedTables) :=
     assignResourceIds functionState m store0
+  let m := remapTableIndices (canonicalTableMap store0.tableIds) m
   let store0 := reapplyLiteralActiveSegments m store0
   let store0 := m.runConstGlobals fuel store0 env
   let store0 := m.runConstElems fuel store0 env
