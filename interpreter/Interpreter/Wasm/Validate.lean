@@ -299,6 +299,11 @@ def Module.tableDecl? (m : Module) (index : Nat) : Option TableDecl :=
 def Module.elementSegmentCount (m : Module) : Nat :=
   m.elements.length
 
+/-- The declared element type of element segment `index`; plain segments
+without a declaration hold `funcref`. -/
+def Module.elementSegmentType (m : Module) (index : Nat) : ValueType :=
+  ((m.elements[index]?).bind (·.elemType)).getD .funcref
+
 def Instruction.checkTableSegmentRefs
     (m : Module) : Instruction → Except String Unit
   | .tableGet tableIndex | .tableSet tableIndex | .tableSize tableIndex
@@ -1504,6 +1509,28 @@ def Module.checkConstProgram
         if (m.funcSig? functionIndex).isNone then throw "unknown function"
     | _ => pure ()
 
+/-- Element-type compatibility of table-to-table and segment-to-table moves:
+`table.copy` needs the source table's element type to fit the destination's,
+and `table.init` needs the element segment's type to fit the table's. Index
+validity is `Instruction.checkTableSegmentRefs`'s job; this only adds the
+typing rule. -/
+def Instruction.checkTableElementTypes (m : Module) : Instruction → Except String Unit
+  | .tableCopy destinationTableIndex sourceTableIndex =>
+      match m.tableDecl? destinationTableIndex, m.tableDecl? sourceTableIndex with
+      | some destination, some source =>
+          if !m.vtCompat source.elemType destination.elemType then
+            .error "type mismatch"
+          else .ok ()
+      | _, _ => .ok ()
+  | .tableInit tableIndex elementIndex =>
+      match m.tableDecl? tableIndex with
+      | some table =>
+          if !m.vtCompat (m.elementSegmentType elementIndex) table.elemType then
+            .error "type mismatch"
+          else .ok ()
+      | none => .ok ()
+  | _ => .ok ()
+
 /-- Run the partial structural validator. `throw` on the first violation. -/
 def Module.validate (m : Module) : Except String Unit := do
   m.checkInterface
@@ -1597,6 +1624,7 @@ def Module.validate (m : Module) : Except String Unit := do
         if t ≥ nTypes then throw "unknown type"
       i.checkBulkMemoryRefs m
       i.checkTableSegmentRefs m
+      i.checkTableElementTypes m
       i.checkGlobalRefs m
       i.checkLocalRefs (f.params.length + f.locals.length)
       i.checkFunctionRefs m

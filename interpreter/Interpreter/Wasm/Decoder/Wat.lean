@@ -2912,6 +2912,15 @@ private def parseElemSegment (ctx : Ctx)
         exprs := exprs
         offsetExpr := offsetExpr }
     return segment
+  -- A `ref.null ht` item is stored as a typeless null, so its heap type must
+  -- belong to the segment's own hierarchy here or the mismatch is lost
+  -- (`(elem funcref (ref.null extern))`, elem.wast:854).
+  let nullMatches (ht : String) : Bool :=
+    match elemType with
+    | some .externref => ht == "extern" || ht == "noextern"
+    | _ => !(ht == "extern" || ht == "noextern" || ht == "exn" || ht == "noexn"
+          || ht == "any" || ht == "eq" || ht == "i31" || ht == "struct"
+          || ht == "array" || ht == "none")
   let mut funcs : List (Option Nat) := []
   for it in rest do
     match it with
@@ -2921,15 +2930,19 @@ private def parseElemSegment (ctx : Ctx)
     | .list [.atom "ref.func", .atom s] =>
       let i ← resolveFuncRef funcIds s
       funcs := funcs ++ [some i]
-    | .list [.atom "ref.null", _] => funcs := funcs ++ [none]
+    | .list [.atom "ref.null", .atom ht] =>
+      if !nullMatches ht then .error "elem: ref.null type does not match the segment type"
+      funcs := funcs ++ [none]
     | .list (.atom "item" :: inner) =>
       match inner with
       | [.atom "ref.func", .atom s]
       | [.list [.atom "ref.func", .atom s]] =>
         let i ← resolveFuncRef funcIds s
         funcs := funcs ++ [some i]
-      | [.atom "ref.null", _]
-      | [.list [.atom "ref.null", _]] => funcs := funcs ++ [none]
+      | [.atom "ref.null", .atom ht]
+      | [.list [.atom "ref.null", .atom ht]] =>
+        if !nullMatches ht then .error "elem: ref.null type does not match the segment type"
+        funcs := funcs ++ [none]
       | _ => .error "elem: unsupported (item ...) form"
     | _ => .error "elem: unsupported entry"
   .ok

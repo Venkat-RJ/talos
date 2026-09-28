@@ -56,6 +56,29 @@ def invalidMemoryCopy64LengthModule : Module :=
           [.constI64 0, .constI64 0, .const 1, .memoryCopy] }]
     memory := some { pagesMin := 1, is64 := true } }
 
+/-! ### Table element typing (`table-sub.wast:13/24`, `elem.wast:989/998`)
+
+`table.copy` needs the source element type to fit the destination table;
+`table.init` needs the segment type to fit the table. -/
+
+def invalidTableCopyElementTypeValidationModule : Module :=
+  { funcs := [{ body := [.const 0, .const 1, .const 2, .tableCopy 0 1] }]
+    tables := [{ min := 10 }, { min := 10, elemType := .externref }] }
+
+def validTableCopySameElementTypeValidationModule : Module :=
+  { funcs := [{ body := [.const 0, .const 1, .const 2, .tableCopy 0 1] }]
+    tables := [{ min := 10 }, { min := 10 }] }
+
+def invalidTableInitSegmentTypeValidationModule : Module :=
+  { funcs := [{ body := [.const 0, .const 1, .const 1, .tableInit 0 0] }]
+    tables := [{ min := 10 }]
+    elements := [{ elemType := some .externref, funcs := [none] }] }
+
+def validTableInitFuncrefSegmentValidationModule : Module :=
+  { funcs := [{ body := [.const 0, .const 1, .const 1, .tableInit 0 0] }]
+    tables := [{ min := 10 }]
+    elements := [{ elemType := some .funcref, funcs := [none] }] }
+
 def validMemoryCopy64ValidationModule : Module :=
   { funcs :=
       [{ body :=
@@ -599,6 +622,20 @@ theorem validator_accepts_typed_memory64_fill :
 theorem validator_rejects_mistyped_memory64_copy_length :
     validationErrorIs invalidMemoryCopy64LengthModule
       "type mismatch" = true := by decide +kernel
+
+theorem validator_rejects_table_copy_element_type :
+    validationErrorIs invalidTableCopyElementTypeValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_table_copy_same_element_type :
+    validationSucceeds validTableCopySameElementTypeValidationModule = true := by decide +kernel
+
+theorem validator_rejects_table_init_segment_type :
+    validationErrorIs invalidTableInitSegmentTypeValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_table_init_funcref_segment :
+    validationSucceeds validTableInitFuncrefSegmentValidationModule = true := by decide +kernel
 
 theorem validator_accepts_typed_memory64_copy :
     validationSucceeds validMemoryCopy64ValidationModule = true := by decide +kernel

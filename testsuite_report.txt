@@ -4420,7 +4420,7 @@ elem.wast:816 assert_invalid pass
 elem.wast:825 assert_invalid pass
 elem.wast:833 assert_invalid pass
 elem.wast:842 assert_invalid pass
-elem.wast:854 assert_invalid skipped:assert_invalid: not rejected
+elem.wast:854 assert_invalid pass
 elem.wast:862 assert_invalid pass
 elem.wast:870 assert_invalid pass
 elem.wast:878 assert_invalid pass
@@ -4444,8 +4444,8 @@ elem.wast:973 assert_return pass
 elem.wast:974 assert_return pass
 elem.wast:979 assert_invalid pass
 elem.wast:984 assert_invalid pass
-elem.wast:989 assert_invalid skipped:assert_invalid: not rejected
-elem.wast:998 assert_invalid skipped:assert_invalid: not rejected
+elem.wast:989 assert_invalid pass
+elem.wast:998 assert_invalid pass
 elem.wast:1007 module pass
 elem.wast:1014 register pass
 elem.wast:1016 assert_return pass
@@ -58244,8 +58244,8 @@ switch.wast:146 assert_return pass
 switch.wast:148 assert_return pass
 switch.wast:150 assert_invalid pass
 table-sub.wast:1 module pass
-table-sub.wast:13 assert_invalid skipped:assert_invalid: not rejected
-table-sub.wast:24 assert_invalid skipped:assert_invalid: not rejected
+table-sub.wast:13 assert_invalid pass
+table-sub.wast:24 assert_invalid pass
 table.wast:3 module pass
 table.wast:4 module pass
 table.wast:5 module pass
