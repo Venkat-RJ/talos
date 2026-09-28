@@ -1504,6 +1504,20 @@ def Module.checkConstProgram
         if (m.funcSig? functionIndex).isNone then throw "unknown function"
     | _ => pure ()
 
+/-- The concrete type indices a GC type definition refers to: through its
+field, element or signature value types, and through its declared supertype. -/
+def GcTypeDef.referencedTypeIndices (td : GcTypeDef) : List Nat :=
+  let ofType : ValueType → List Nat
+    | .ref _ (.concrete index) => [index]
+    | _ => []
+  let ofStorage : StorageType → List Nat
+    | .val valueType => ofType valueType
+    | .packed _ => []
+  (match td.comp with
+   | .func signature => (signature.params ++ signature.results).flatMap ofType
+   | .struct fields => fields.flatMap (ofStorage ·.storage)
+   | .array elem => ofStorage elem.storage) ++ td.super.toList
+
 /-- Run the partial structural validator. `throw` on the first violation. -/
 def Module.validate (m : Module) : Except String Unit := do
   m.checkInterface
@@ -1579,6 +1593,16 @@ def Module.validate (m : Module) : Except String Unit := do
             if referenced.isMut then throw "constant expression required"
           | none => throw "unknown global"
         | _ => pure ()
+  -- 0. A type definition may refer only to types in its own recursion group
+  -- or in earlier ones: with singleton groups, to itself and earlier types.
+  for (td, index) in m.gcTypes.zipIdx do
+    let groupEnd := match td.recGroup with
+      | some g =>
+          (((List.range nTypes).filter fun j =>
+              (m.gcTypes[j]?).any (·.recGroup == some g)).getLast?).getD index
+      | none => index
+    for referenced in td.referencedTypeIndices do
+      if referenced > groupEnd then throw "unknown type"
   -- 1. `sub` declarations: supertype in range, non-final, and a structural
   -- supertype of the declared composite.
   for td in m.gcTypes do

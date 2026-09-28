@@ -50,6 +50,43 @@ def validMemoryFill64ValidationModule : Module :=
       [{ body := [.constI64 0, .const 0, .constI64 1, .memoryFill] }]
     memory := some { pagesMin := 1, is64 := true } }
 
+/-! ### Recursion-group references (`type-rec.wast:22/29`,
+`type-equivalence.wast:77`)
+
+A type may refer to types in its own recursion group or earlier ones, never
+to a later group. -/
+
+def invalidForwardTypeReferenceValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .func { params := [.ref true (.concrete 1)] } },
+       { comp := .func {} }] }
+
+def invalidMutualSingletonReferenceValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .func { params := [.ref true (.concrete 1)] } },
+       { comp := .func { params := [.ref true (.concrete 0)] } }] }
+
+def validRecGroupForwardReferenceValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .func { params := [.ref true (.concrete 1)] }, recGroup := some 0 },
+       { comp := .func { params := [.ref true (.concrete 0)] }, recGroup := some 0 }] }
+
+def invalidReferencePastRecGroupValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .func { params := [.ref true (.concrete 2)] }, recGroup := some 0 },
+       { comp := .func {}, recGroup := some 0 },
+       { comp := .func {} }] }
+
+def validSelfAndBackwardReferenceValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .struct [{ storage := .val (.ref true (.concrete 0)) }] },
+       { comp := .array { storage := .val (.ref true (.concrete 0)) } }] }
+
 def invalidMemoryCopy64LengthModule : Module :=
   { funcs :=
       [{ body :=
@@ -595,6 +632,24 @@ theorem validator_rejects_memory_fill_without_memory :
 
 theorem validator_accepts_typed_memory64_fill :
     validationSucceeds validMemoryFill64ValidationModule = true := by decide +kernel
+
+theorem validator_rejects_forward_type_reference :
+    validationErrorIs invalidForwardTypeReferenceValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_rejects_mutual_singleton_reference :
+    validationErrorIs invalidMutualSingletonReferenceValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_accepts_rec_group_forward_reference :
+    validationSucceeds validRecGroupForwardReferenceValidationModule = true := by decide +kernel
+
+theorem validator_rejects_reference_past_rec_group :
+    validationErrorIs invalidReferencePastRecGroupValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_accepts_self_and_backward_reference :
+    validationSucceeds validSelfAndBackwardReferenceValidationModule = true := by decide +kernel
 
 theorem validator_rejects_mistyped_memory64_copy_length :
     validationErrorIs invalidMemoryCopy64LengthModule
