@@ -1160,6 +1160,17 @@ def Instruction.straightSig (m : Module) (locals : List ValueType)
     | .arrayNewDefault t =>
       (m.arrayElem? t).map fun _ =>
         ([.i32], [.ref false (.concrete t)])
+    -- `array.fill $t`: pops length, the fill value (of the element type), the
+    -- start offset, and the array reference.
+    | .arrayFill t =>
+      (m.arrayElem? t).map fun ft =>
+        ([.i32, ft.storage.vt, .i32, .ref true (.concrete t)], [])
+    -- `array.init_elem $t $e`: pops length, segment offset, array offset, and
+    -- the array reference. Element-type compatibility with the segment is
+    -- checked at module level.
+    | .arrayInitElem t _ =>
+      (m.arrayElem? t).map fun _ =>
+        ([.i32, .i32, .i32, .ref true (.concrete t)], [])
     | .arrayNew t =>
       (m.arrayElem? t).map fun ft =>
         ([.i32, ft.storage.vt], [.ref false (.concrete t)])
@@ -1638,6 +1649,19 @@ def Module.validate (m : Module) : Except String Unit := do
         match m.arrayElem? t with
         | some ft => if !ft.isMut then throw "immutable array"
         | none    => throw "unknown type"
+      | .gc (.arrayFill t) =>
+        match m.arrayElem? t with
+        | some ft => if !ft.isMut then throw "immutable array"
+        | none    => throw "unknown type"
+      | .gc (.arrayInitElem t elementIndex) =>
+        match m.arrayElem? t with
+        | none => throw "unknown type"
+        | some ft =>
+          if !ft.isMut then throw "immutable array"
+          if elementIndex ≥ m.elementSegmentCount then throw "unknown element segment"
+          -- The segment's reference type must fit the element type.
+          if !m.vtCompat (m.elementSegmentType elementIndex) ft.storage.vt then
+            throw "type mismatch"
       | .gc (.arrayInitData t _) =>
         match m.arrayElem? t with
         | none => throw "unknown type"

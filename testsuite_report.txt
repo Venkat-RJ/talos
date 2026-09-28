@@ -1209,9 +1209,9 @@ array_copy.wast:136 assert_return pass
 array_copy.wast:137 assert_return pass
 array_copy.wast:138 assert_return pass
 array_copy.wast:139 assert_return pass
-array_fill.wast:6 assert_invalid skipped:assert_invalid: not rejected
-array_fill.wast:17 assert_invalid skipped:assert_invalid: not rejected
-array_fill.wast:28 assert_invalid skipped:assert_invalid: not rejected
+array_fill.wast:6 assert_invalid pass
+array_fill.wast:17 assert_invalid pass
+array_fill.wast:28 assert_invalid pass
 array_fill.wast:38 module pass
 array_fill.wast:59 assert_trap pass
 array_fill.wast:62 assert_trap pass
@@ -1285,9 +1285,9 @@ array_init_data.wast:209 assert_trap pass
 array_init_data.wast:210 assert_trap pass
 array_init_data.wast:211 assert_return pass
 array_init_data.wast:212 assert_trap pass
-array_init_elem.wast:6 assert_invalid skipped:assert_invalid: not rejected
-array_init_elem.wast:19 assert_invalid skipped:assert_invalid: not rejected
-array_init_elem.wast:32 assert_invalid skipped:assert_invalid: not rejected
+array_init_elem.wast:6 assert_invalid pass
+array_init_elem.wast:19 assert_invalid pass
+array_init_elem.wast:32 assert_invalid pass
 array_init_elem.wast:44 module pass
 array_init_elem.wast:85 assert_trap pass
 array_init_elem.wast:88 assert_trap pass

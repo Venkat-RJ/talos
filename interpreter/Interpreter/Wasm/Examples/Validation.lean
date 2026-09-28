@@ -88,6 +88,51 @@ def validMemoryCopy64ValidationModule : Module :=
 def invalidLoadWithoutMemoryModule : Module :=
   { funcs := [{ body := [.const 0, .load32 0], results := [.i32] }] }
 
+/-! ### `array.fill` and `array.init_elem` (`array_fill.wast:6-28`,
+`array_init_elem.wast:6-32`)
+
+Both need a mutable array; `array.fill` takes a value of the element type and
+`array.init_elem` a segment whose reference type fits the element type. -/
+
+def invalidArrayFillImmutableValidationModule : Module :=
+  { gcTypes := [{ comp := .array { storage := .packed 8 } }]
+    funcs :=
+      [{ params := [.ref false (.concrete 0), .i32],
+         body := [.localGet 0, .const 0, .localGet 1, .const 0, .gc (.arrayFill 0)] }] }
+
+def invalidArrayFillValueTypeValidationModule : Module :=
+  { gcTypes := [{ comp := .array { storage := .packed 8, isMut := true } }]
+    funcs :=
+      [{ params := [.ref false (.concrete 0), .funcref],
+         body := [.localGet 0, .const 0, .localGet 1, .const 0, .gc (.arrayFill 0)] }] }
+
+def validArrayFillValidationModule : Module :=
+  { gcTypes := [{ comp := .array { storage := .packed 8, isMut := true } }]
+    funcs :=
+      [{ params := [.ref false (.concrete 0), .i32],
+         body := [.localGet 0, .const 0, .localGet 1, .const 0, .gc (.arrayFill 0)] }] }
+
+def invalidArrayInitElemImmutableValidationModule : Module :=
+  { gcTypes := [{ comp := .array { storage := .val .funcref } }]
+    elements := [{ elemType := some .funcref }]
+    funcs :=
+      [{ params := [.ref false (.concrete 0)],
+         body := [.localGet 0, .const 0, .const 0, .const 0, .gc (.arrayInitElem 0 0)] }] }
+
+def invalidArrayInitElemSegmentTypeValidationModule : Module :=
+  { gcTypes := [{ comp := .array { storage := .val .funcref, isMut := true } }]
+    elements := [{ elemType := some .externref }]
+    funcs :=
+      [{ params := [.ref false (.concrete 0)],
+         body := [.localGet 0, .const 0, .const 0, .const 0, .gc (.arrayInitElem 0 0)] }] }
+
+def validArrayInitElemValidationModule : Module :=
+  { gcTypes := [{ comp := .array { storage := .val .funcref, isMut := true } }]
+    elements := [{ elemType := some .funcref }]
+    funcs :=
+      [{ params := [.ref false (.concrete 0)],
+         body := [.localGet 0, .const 0, .const 0, .const 0, .gc (.arrayInitElem 0 0)] }] }
+
 def invalidMemory64LoadAddressModule : Module :=
   { funcs := [{ body := [.const 0, .load32 0], results := [.i32] }]
     memory := some { pagesMin := 1, is64 := true } }
@@ -643,6 +688,28 @@ theorem validator_accepts_typed_memory64_copy :
 theorem validator_rejects_load_without_memory :
     validationErrorIs invalidLoadWithoutMemoryModule
       "unknown memory" = true := by decide +kernel
+
+theorem validator_rejects_array_fill_immutable :
+    validationErrorIs invalidArrayFillImmutableValidationModule
+      "immutable array" = true := by decide +kernel
+
+theorem validator_rejects_array_fill_value_type :
+    validationErrorIs invalidArrayFillValueTypeValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_array_fill :
+    validationSucceeds validArrayFillValidationModule = true := by decide +kernel
+
+theorem validator_rejects_array_init_elem_immutable :
+    validationErrorIs invalidArrayInitElemImmutableValidationModule
+      "immutable array" = true := by decide +kernel
+
+theorem validator_rejects_array_init_elem_segment_type :
+    validationErrorIs invalidArrayInitElemSegmentTypeValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_array_init_elem :
+    validationSucceeds validArrayInitElemValidationModule = true := by decide +kernel
 
 theorem validator_rejects_mistyped_memory64_load_address :
     validationErrorIs invalidMemory64LoadAddressModule
