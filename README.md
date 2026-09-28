@@ -9,6 +9,11 @@ The same definitions that _execute_ a Wasm program are the ones you _reason abou
 
 > **Work in progress.** Talos is under active development. APIs and proof interfaces may change.
 
+> **New to Lean, WebAssembly, or formal verification?** Start with the
+> [onboarding guides](docs/README.md): concepts for people coming from Python or
+> JavaScript, a getting-started tutorial that ends with your first proof, a
+> walkthrough of real proofs, and a guide to making your first contribution.
+
 ## What this is
 
 The goal is a **feature-complete, executable semantics for WebAssembly** that doubles as a formal object. You can:
@@ -113,7 +118,8 @@ just testsuite i32
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md). If you are new to the project, the
+[onboarding guides](docs/README.md) walk you from installation to a first pull request.
 
 ## License
 
