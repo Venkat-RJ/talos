@@ -507,6 +507,30 @@ private def spectestGlobal? : String → Option Wasm.Value
   | "global_f64" => some (.f64 (666.6 : Float).toBits)
   | _ => none
 
+/-- Translate a module-local `funcref` into the script-wide function id it
+denotes (offset by `foreignFunctionBase`), so a reference can cross instances:
+instantiation encodes imported funcref globals and committed tables this way,
+and `decodeSharedFuncref` maps a shared id back to a local index when the
+receiving instance has that function in its own index space. -/
+private def encodeSharedFuncref (store : Wasm.Store Unit) : Wasm.Value → Wasm.Value
+  | .funcref (some index) =>
+    if Wasm.SmallStep.foreignFunctionBase ≤ index then .funcref (some index)
+    else
+      match store.functionIds[index]? with
+      | some id => .funcref (some (Wasm.SmallStep.foreignFunctionBase + id))
+      | none => .funcref (some index)
+  | value => value
+
+private def decodeSharedFuncref (store : Wasm.Store Unit) : Wasm.Value → Wasm.Value
+  | .funcref (some index) =>
+    if Wasm.SmallStep.foreignFunctionBase ≤ index then
+      let id := index - Wasm.SmallStep.foreignFunctionBase
+      match store.functionIds.findIdx? (· = id) with
+      | some localIndex => .funcref (some localIndex)
+      | none => .funcref (some index)
+    else .funcref (some index)
+  | value => value
+
 /-- Copy imported entity values (globals/tables/memories) into a fresh
 initial store, then re-apply the module's active element and data
 segments so segments targeting an imported table/memory land on the
@@ -521,7 +545,10 @@ private def applyEntityImports (sst : ScriptState) (m : Wasm.Module)
       else match resolveRegistered sst modN with
         | some (em, estore, _) =>
           match em.globalExports.find? (·.1 = name) with
-          | some (_, gIdx) => estore.globals.globals[gIdx]?
+          | some (_, gIdx) =>
+            -- A funcref names a function of the *exporting* instance; carry it
+            -- across as a shared function id, not as a local index (elem.wast:1043).
+            estore.globals.globals[gIdx]?.map (encodeSharedFuncref estore)
           | none => none
         | none => none
     match v? with
@@ -838,25 +865,6 @@ private def assignFunctionIds (sst : ScriptState) (m : Wasm.Module)
     functionIds := functionIds ++ [id]
   return ({ store0 with functionIds }, functions)
 
-private def encodeSharedFuncref (store : Wasm.Store Unit) : Wasm.Value → Wasm.Value
-  | .funcref (some index) =>
-    if Wasm.SmallStep.foreignFunctionBase ≤ index then .funcref (some index)
-    else
-      match store.functionIds[index]? with
-      | some id => .funcref (some (Wasm.SmallStep.foreignFunctionBase + id))
-      | none => .funcref (some index)
-  | value => value
-
-private def decodeSharedFuncref (store : Wasm.Store Unit) : Wasm.Value → Wasm.Value
-  | .funcref (some index) =>
-    if Wasm.SmallStep.foreignFunctionBase ≤ index then
-      let id := index - Wasm.SmallStep.foreignFunctionBase
-      match store.functionIds.findIdx? (· = id) with
-      | some localIndex => .funcref (some localIndex)
-      | none => .funcref (some index)
-    else .funcref (some index)
-  | value => value
-
 /-- Refresh a module-local store from the script-wide shared resources before
 an action. -/
 private def hydrateStore (sst : ScriptState) (store0 : Wasm.Store Unit) :
@@ -866,7 +874,8 @@ private def hydrateStore (sst : ScriptState) (store0 : Wasm.Store Unit) :
     match sst.sharedGlobals[id]? with
     | some value =>
       store := { store with globals :=
-        { globals := Wasm.listSetAt store.globals.globals index value } }
+        { globals := Wasm.listSetAt store.globals.globals index
+            (decodeSharedFuncref store0 value) } }
     | none => pure ()
   for (id, index) in store0.memoryIds.zipIdx do
     match sst.sharedMemories[id]? with
@@ -900,7 +909,8 @@ private def commitStore (sst : ScriptState) (m : Wasm.Module)
   for (id, index) in store.globalIds.zipIdx do
     match store.globals.globals[index]? with
     | some value =>
-      if id < globals.size then globals := globals.set! id value
+      if id < globals.size then
+        globals := globals.set! id (encodeSharedFuncref store value)
     | none => pure ()
   for (id, index) in store.memoryIds.zipIdx do
     match storeMemory? store index with
