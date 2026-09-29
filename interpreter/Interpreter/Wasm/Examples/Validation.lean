@@ -65,6 +65,93 @@ def validUntypedSelectNumericValidationModule : Module :=
   { funcs :=
       [{ body := [.const 1, .const 2, .const 0, .select], results := [.i32] }] }
 
+/-- `struct.new_default` is outside the partial stack checker, which then stops
+checking the function. The annotation checks must not depend on reaching the
+`select`. -/
+def invalidTypedSelectUnknownTypeAfterUnmodelledValidationModule : Module :=
+  { gcTypes := [{ comp := .struct [] }]
+    funcs :=
+      [{ body :=
+          [.gc (.structNewDefault 0), .drop,
+           .unreachable, .select (some [.ref false (.concrete 7)]), .drop] }] }
+
+def invalidTypedSelectNoResultAfterUnmodelledValidationModule : Module :=
+  { gcTypes := [{ comp := .struct [] }]
+    funcs :=
+      [{ body :=
+          [.gc (.structNewDefault 0), .drop, .unreachable, .select (some []), .drop] }] }
+
+def validTypedSelectAfterUnmodelledValidationModule : Module :=
+  { gcTypes := [{ comp := .struct [] }]
+    funcs :=
+      [{ body :=
+          [.gc (.structNewDefault 0), .drop, .unreachable, .select (some [.i32]), .drop] }] }
+
+/-! Decoded `select` annotations: the decoder keeps `(result …)` as written in
+the folded and unfolded forms, and fails on a token that is not a value type.
+How many types there are is a typing question, left to validation. -/
+
+/-- The `select` annotations in a decoded module's function bodies, in order,
+or `none` if the module does not decode. -/
+def decodedSelectAnnotations (wat : String) : Option (List (Option (List ValueType))) :=
+  (Wasm.Decoder.Wat.decode wat).toOption.map fun m =>
+    m.funcs.flatMap fun f => f.body.allInstrs.filterMap fun
+      | .select resultTypes => some resultTypes
+      | _ => none
+
+/-- The decoder's error, or `none` if `wat` decodes. -/
+def decodeErrorOf (wat : String) : Option String :=
+  match Wasm.Decoder.Wat.decode wat with
+  | .error message => some message
+  | .ok _ => none
+
+def unfoldedFuncrefSelectWat : String :=
+  "(module (func (result funcref) ref.null func ref.null func i32.const 0 select (result funcref)))"
+
+def foldedFuncrefSelectWat : String :=
+  "(module (func (result funcref)
+     (select (result funcref) (ref.null func) (ref.null func) (i32.const 0))))"
+
+def namedRefSelectWat : String :=
+  "(module (type $t (func)) (func (param (ref null $t)) (result (ref null $t))
+     local.get 0 local.get 0 i32.const 0 select (result (ref null $t))))"
+
+def indexedRefSelectWat : String :=
+  "(module (type (func)) (func (param (ref 0)) (result (ref 0))
+     (select (result (ref 0)) (local.get 0) (local.get 0) (i32.const 0))))"
+
+def untypedSelectWat : String :=
+  "(module (func (result i32) i32.const 1 i32.const 2 i32.const 0 select))"
+
+def emptySelectAnnotationWat : String :=
+  "(module (func i32.const 1 i32.const 2 i32.const 0 select (result) drop))"
+
+def twoSelectAnnotationsWat : String :=
+  "(module (func (result i32 i32) i32.const 1 i32.const 2 i32.const 0
+     select (result i32) (result i32)))"
+
+def unknownTypeSelectAnnotationWat : String :=
+  "(module (func (result funcref)
+     (select (result (ref null 5)) (ref.null func) (ref.null func) (i32.const 0))))"
+
+def malformedAtomSelectWat : String :=
+  "(module (func (result i32) i32.const 1 i32.const 2 i32.const 0 select (result i32 bogus)))"
+
+def malformedNestedSelectWat : String :=
+  "(module (func (result i32) i32.const 1 i32.const 2 i32.const 0 select (result (bogus))))"
+
+def malformedHeapTypeSelectWat : String :=
+  "(module (func (result funcref) ref.null func ref.null func i32.const 0
+     select (result (ref null bogus))))"
+
+def malformedAtomFoldedSelectWat : String :=
+  "(module (func (result i32)
+     (select (result i32 bogus) (i32.const 1) (i32.const 2) (i32.const 0))))"
+
+def malformedNestedFoldedSelectWat : String :=
+  "(module (func (result i32)
+     (select (result (bogus)) (i32.const 1) (i32.const 2) (i32.const 0))))"
+
 def invalidDataDropModule : Module :=
   { funcs := [{ body := [.dataDrop 0] }] }
 
@@ -648,6 +735,80 @@ theorem validator_accepts_typed_select_after_unreachable :
 
 theorem validator_accepts_untyped_numeric_select :
     validationSucceeds validUntypedSelectNumericValidationModule = true := by decide +kernel
+
+theorem validator_rejects_typed_select_unknown_type_after_unmodelled :
+    validationErrorIs invalidTypedSelectUnknownTypeAfterUnmodelledValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_rejects_typed_select_without_result_after_unmodelled :
+    validationErrorIs invalidTypedSelectNoResultAfterUnmodelledValidationModule
+      "invalid result arity" = true := by decide +kernel
+
+theorem validator_accepts_typed_select_after_unmodelled :
+    validationSucceeds validTypedSelectAfterUnmodelledValidationModule = true := by
+  decide +kernel
+
+theorem decoder_keeps_unfolded_select_annotation :
+    decodedSelectAnnotations unfoldedFuncrefSelectWat = some [some [.funcref]] := by cbv
+
+theorem decoder_keeps_folded_select_annotation :
+    decodedSelectAnnotations foldedFuncrefSelectWat = some [some [.funcref]] := by cbv
+
+theorem decoder_keeps_named_ref_select_annotation :
+    decodedSelectAnnotations namedRefSelectWat = some [some [.ref true (.named "t")]] := by
+  cbv
+
+theorem decoder_keeps_indexed_ref_select_annotation :
+    decodedSelectAnnotations indexedRefSelectWat =
+      some [some [.ref false (.concrete 0)]] := by cbv
+
+theorem decoder_keeps_untyped_select_unannotated :
+    decodedSelectAnnotations untypedSelectWat = some [none] := by cbv
+
+theorem decoder_keeps_empty_select_annotation :
+    decodedSelectAnnotations emptySelectAnnotationWat = some [some []] := by cbv
+
+theorem decoder_joins_select_annotations :
+    decodedSelectAnnotations twoSelectAnnotationsWat = some [some [.i32, .i32]] := by cbv
+
+theorem decoder_keeps_unknown_type_select_annotation :
+    decodedSelectAnnotations unknownTypeSelectAnnotationWat =
+      some [some [.ref true (.concrete 5)]] := by cbv
+
+theorem validator_accepts_decoded_typed_selects :
+    (validationSucceeds (decodeOrDefault unfoldedFuncrefSelectWat) &&
+      validationSucceeds (decodeOrDefault foldedFuncrefSelectWat) &&
+      validationSucceeds (decodeOrDefault namedRefSelectWat) &&
+      validationSucceeds (decodeOrDefault indexedRefSelectWat)) = true := by cbv
+
+theorem validator_rejects_decoded_empty_select_annotation :
+    validationErrorIs (decodeOrDefault emptySelectAnnotationWat)
+      "invalid result arity" = true := by cbv
+
+theorem validator_rejects_decoded_two_select_annotations :
+    validationErrorIs (decodeOrDefault twoSelectAnnotationsWat)
+      "invalid result arity" = true := by cbv
+
+theorem validator_rejects_decoded_unknown_type_select_annotation :
+    validationErrorIs (decodeOrDefault unknownTypeSelectAnnotationWat)
+      "unknown type" = true := by cbv
+
+theorem decoder_rejects_malformed_select_atom :
+    decodeErrorOf malformedAtomSelectWat = some "malformed select result type" := by cbv
+
+theorem decoder_rejects_malformed_select_nested_form :
+    decodeErrorOf malformedNestedSelectWat = some "malformed select result type" := by cbv
+
+theorem decoder_rejects_malformed_select_heap_type :
+    decodeErrorOf malformedHeapTypeSelectWat = some "malformed select result type" := by cbv
+
+theorem decoder_rejects_malformed_folded_select_atom :
+    decodeErrorOf malformedAtomFoldedSelectWat = some "malformed select result type" := by
+  cbv
+
+theorem decoder_rejects_malformed_folded_select_nested_form :
+    decodeErrorOf malformedNestedFoldedSelectWat = some "malformed select result type" := by
+  cbv
 
 theorem validator_rejects_unknown_data_drop :
     validationErrorIs invalidDataDropModule "unknown data segment" = true := by decide +kernel

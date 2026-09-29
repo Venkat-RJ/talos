@@ -138,6 +138,24 @@ def Instruction.checkBulkMemoryRefs
         else .ok ()
       else .ok ()
 
+/-- A typed `select` names exactly one result type, and a concrete reference
+in it names a declared type. Checked for every instruction (like the other
+immediate checks below), so the partial stack checker, which stops at the
+first instruction it does not model, cannot skip it. The index test is the
+two-table lookup of `Module.typeIndexKnown` (#251); once both land, the type
+reference belongs in `Instruction.valueTypeRefs` and only the arity check
+stays here. -/
+def Instruction.checkSelectAnnotation (m : Module) : Instruction → Except String Unit
+  | .select (some [selectType]) =>
+      match selectType with
+      | .ref _ (.concrete index) =>
+          if index ≥ m.types.length && index ≥ m.gcTypes.length then
+            .error "unknown type"
+          else .ok ()
+      | _ => .ok ()
+  | .select (some _) => .error "invalid result arity"
+  | _ => .ok ()
+
 /-! ### SIMD immediate validation -/
 
 def Instruction.checkSimdImmediates : Instruction → Except String Unit
@@ -1189,18 +1207,14 @@ def Program.checkTypes
           let afterCondition ← state.popExpected m .i32
           match resultTypes with
           | some [selectType] =>
-              -- Typed `select t`: both operands and the result are `t`.
-              -- Same two-table lookup as `Module.typeIndexKnown` in #251; call
-              -- that helper once it lands.
-              match selectType with
-              | .ref _ (.concrete index) =>
-                  if index ≥ m.types.length && index ≥ m.gcTypes.length then
-                    throw "unknown type"
-              | _ => pure ()
+              -- Typed `select t`: both operands and the result are `t`. The
+              -- annotation itself is checked by `checkSelectAnnotation`.
               let afterOperands ←
                 afterCondition.applySig m ([selectType, selectType], [])
               pure (some
                 { afterOperands with stack := some selectType :: afterOperands.stack })
+          -- Rejected earlier by `checkSelectAnnotation`; kept so the checker
+          -- stands alone.
           | some _ => throw "invalid result arity"
           | none =>
               -- Untyped `select`: numeric or vector operands only. A reference
@@ -1623,6 +1637,7 @@ def Module.validate (m : Module) : Except String Unit := do
       i.checkLocalRefs (f.params.length + f.locals.length)
       i.checkFunctionRefs m
       i.checkSimdImmediates
+      i.checkSelectAnnotation m
       match i with
       | .gc (.structSet t fld) =>
         match m.structField? t fld with

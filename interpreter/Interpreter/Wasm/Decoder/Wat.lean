@@ -500,6 +500,23 @@ private def listToValueType (xs : List Sexpr) : Wasm.ValueType :=
       .ref true (atomToHeapType ht)
   | _ => .i32
 
+/-- The heap type of an explicit `(ref …)`, or `none` when the atom is not
+one. Unlike `atomToHeapType`, a bare atom that is neither an abstract heap
+type, a `$t` name nor a decimal index is rejected, not read as a type name. -/
+private def atomToHeapType? (ht : String) : Option Wasm.GcHeapType :=
+  match atomToHeapType ht with
+  | .named name => if startsWith ht "$" then some (.named name) else none
+  | heap => some heap
+
+/-- Decode one value-type token strictly: an atom accepted by
+`atomToValueType?`, `(ref ht)` or `(ref null ht)`. Anything else is `none`
+rather than a default type, so a caller can report it as malformed. -/
+private def sexprToValueType? : Sexpr → Option Wasm.ValueType
+  | .atom a => atomToValueType? a
+  | .list [.atom "ref", .atom ht] => (.ref false ·) <$> atomToHeapType? ht
+  | .list [.atom "ref", .atom "null", .atom ht] => (.ref true ·) <$> atomToHeapType? ht
+  | _ => none
+
 /-- Resolve a `(type N)` reference on a block/loop/if to the signature
 declared in the module's type table. Returns `none` if the index/id is
 unknown or the entry's signature is outside our supported integer
@@ -553,16 +570,19 @@ private def skipBlockType (resolveType : BlockTypeResolver) :
 /-- Collect the `(result T*)` annotations of a typed `select` and nothing
 else: unlike block types, `select` admits no `(type N)` or `(param …)` form, so
 any other token ends the annotation. Returns `none` when no annotation is
-present (the untyped `select`). -/
-private def collectSelectResults : List Sexpr → Option (List Wasm.ValueType) × List Sexpr
-  | .list (.atom "result" :: ts) :: r =>
-    let here := ts.filterMap fun
-      | .atom a => atomToValueType? a
-      | .list l => some (listToValueType l)
-    match collectSelectResults r with
-    | (some more, rest) => (some (here ++ more), rest)
-    | (none, rest) => (some here, rest)
-  | xs => (none, xs)
+present (the untyped `select`). A token inside `(result …)` that is not a
+value type is malformed and fails decoding: dropping it, or defaulting it to
+`i32`, would hand validation an annotation other than the one written. The
+number of types is left to validation (`invalid result arity`). -/
+private def collectSelectResults :
+    List Sexpr → Except Err (Option (List Wasm.ValueType) × List Sexpr)
+  | .list (.atom "result" :: ts) :: r => do
+    let here ← ts.mapM fun t => match sexprToValueType? t with
+      | some valueType => .ok valueType
+      | none => .error "malformed select result type"
+    let (more, rest) ← collectSelectResults r
+    .ok (some (here ++ more.getD []), rest)
+  | xs => .ok (none, xs)
 
 /-- Pull an optional `$label` and any `(type N)` / `(param T*)` /
 `(result T*)` annotations off the front of a block/loop/if's tokens.
@@ -1472,10 +1492,10 @@ private def parseInstr (ctx : Ctx) (toks : List Sexpr)
     | "table.copy"  => parseTableCopy ctx rest
     | "table.init"  => parseTableInit ctx rest
     | "elem.drop"   => parseImmediateNat (resolveNamed ctx.elemNames "elem") .elemDrop op rest
-    | "select"    =>
+    | "select"    => do
       -- `select (result t)*` keeps its annotation so validation can check
       -- the typed form; plain `select` decodes to `.select none`.
-      let (resultTypes, rest') := collectSelectResults rest
+      let (resultTypes, rest') ← collectSelectResults rest
       .ok ([.select resultTypes], rest')
     | "block"     =>
       parseStructured ctx
@@ -1786,7 +1806,7 @@ partial_fixpoint
 
 private def foldedSelect (ctx : Ctx) (xs : List Sexpr)
     : Except Err (List Wasm.Instruction) := do
-  let (resultTypes, xs') := collectSelectResults xs
+  let (resultTypes, xs') ← collectSelectResults xs
   let acc ← foldedOperands ctx "folded select" xs'
   .ok (acc ++ [.select resultTypes])
 partial_fixpoint
