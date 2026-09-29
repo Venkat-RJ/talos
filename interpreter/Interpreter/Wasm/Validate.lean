@@ -1237,6 +1237,10 @@ def Module.checkBrOnCast (m : Module) (state : CheckState) (labels : List LabelT
   let fallthrough : ValueType := if fail then target else sourceType.castDifference target
   let some (arity, types?) := labels[depth]?
     | throw "unknown label"
+  -- The label must receive the reference, so its type `[t* rt']` is never
+  -- empty. Without this, an empty label consumes nothing below and the
+  -- branched reference would stay on the stack under the fall-through one.
+  if arity = 0 then throw "type mismatch"
   -- The label consumes `[t* rt']`. On fall-through the operands below the
   -- reference keep only the label's types `t*` (WebAssembly/gc#516), exactly as
   -- for `br_on_null`.

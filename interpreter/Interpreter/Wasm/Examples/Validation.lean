@@ -141,6 +141,78 @@ def validRefTestAndCastValidationModule : Module :=
           [.localGet 0, .gc (.refCast true .structT), .drop,
            .localGet 0, .gc (.refTest false .i31)] }] }
 
+/-- Both cast branches keep the reference, so the target label must accept one:
+a label with no results is invalid. The second `drop` would consume the
+reference an empty label fails to take. -/
+def invalidBrOnCastZeroResultLabelValidationModule : Module :=
+  { funcs :=
+      [{ params := [.anyref],
+         body :=
+          [.block 0 0
+            [.localGet 0, .gc (.brOnCast 0 false .i31 (some .anyref)), .drop, .drop]
+            [] []] }] }
+
+def invalidBrOnCastFailZeroResultLabelValidationModule : Module :=
+  { funcs :=
+      [{ params := [.anyref],
+         body :=
+          [.block 0 0
+            [.localGet 0, .gc (.brOnCastFail 0 false .i31 (some .anyref)), .drop, .drop]
+            [] []] }] }
+
+/-- Label `[i32 (ref i31)]`: the fall-through is `[i32 anyref]`, rebuilt into
+exactly the block's two results, so a leftover operand would mistype. -/
+def validBrOnCastMultiValueLabelValidationModule : Module :=
+  { funcs :=
+      [{ params := [.anyref], results := [.i32, .ref false .i31],
+         body :=
+          [.block 0 2
+            [.const 7, .localGet 0, .gc (.brOnCast 0 false .i31 (some .anyref)),
+             .drop, .const 0, .gc .refI31]
+            [] [.i32, .ref false .i31]] }] }
+
+/-- Label `[i32 anyref]`: the fall-through `[i32 (ref i31)]` is the block's
+result exactly. -/
+def validBrOnCastFailMultiValueLabelValidationModule : Module :=
+  { funcs :=
+      [{ params := [.anyref], results := [.i32, .anyref],
+         body :=
+          [.block 0 2
+            [.const 7, .localGet 0, .gc (.brOnCastFail 0 false .i31 (some .anyref))]
+            [] [.i32, .anyref]] }] }
+
+/-- Hand-built blocks that give only a result arity take the arity-only path. -/
+def validBrOnCastArityOnlyLabelValidationModule : Module :=
+  { funcs :=
+      [{ params := [.anyref],
+         body :=
+          [.block 0 1 [.localGet 0, .gc (.brOnCast 0 false .i31 (some .anyref))] [] [],
+           .drop] }] }
+
+def validBrOnCastFailArityOnlyLabelValidationModule : Module :=
+  { funcs :=
+      [{ params := [.anyref],
+         body :=
+          [.block 0 1 [.localGet 0, .gc (.brOnCastFail 0 false .i31 (some .anyref))] [] [],
+           .drop] }] }
+
+/-- Check `br_on_cast 0 anyref (ref i31)` (or its `_fail` form) directly, with an
+`anyref` operand above `below`. -/
+def brOnCastCheck (labels : List LabelType) (below : List CheckedType) (fail : Bool) :
+    Except String CheckState :=
+  ({ funcs := [] } : Module).checkBrOnCast { stack := some .anyref :: below } labels 0
+    false .i31 (some .anyref) fail
+
+/-- The operand stack (top first) the cast leaves, if it type-checks. -/
+def brOnCastStack (labels : List LabelType) (below : List CheckedType) (fail : Bool) :
+    Option (List CheckedType) :=
+  (brOnCastCheck labels below fail).toOption.map (·.stack)
+
+def brOnCastErrorIs (labels : List LabelType) (fail : Bool) (expected : String) : Bool :=
+  match brOnCastCheck labels [] fail with
+  | .error actual => actual == expected
+  | .ok _ => false
+
 def invalidLoadWithoutMemoryModule : Module :=
   { funcs := [{ body := [.const 0, .load32 0], results := [.i32] }] }
 
@@ -714,6 +786,68 @@ theorem validator_rejects_ref_test_across_hierarchies :
 
 theorem validator_accepts_ref_test_and_cast :
     validationSucceeds validRefTestAndCastValidationModule = true := by decide +kernel
+
+theorem validator_rejects_br_on_cast_to_zero_result_label :
+    validationErrorIs invalidBrOnCastZeroResultLabelValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_rejects_br_on_cast_fail_to_zero_result_label :
+    validationErrorIs invalidBrOnCastFailZeroResultLabelValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_br_on_cast_multi_value_label :
+    validationSucceeds validBrOnCastMultiValueLabelValidationModule = true := by decide +kernel
+
+theorem validator_accepts_br_on_cast_fail_multi_value_label :
+    validationSucceeds validBrOnCastFailMultiValueLabelValidationModule = true := by
+  decide +kernel
+
+theorem validator_accepts_br_on_cast_arity_only_label :
+    validationSucceeds validBrOnCastArityOnlyLabelValidationModule = true := by decide +kernel
+
+theorem validator_accepts_br_on_cast_fail_arity_only_label :
+    validationSucceeds validBrOnCastFailArityOnlyLabelValidationModule = true := by
+  decide +kernel
+
+/-! Stack shapes (top first) left by `br_on_cast 0 anyref (ref i31)`: the
+fall-through keeps `(ref null any)` (the source minus the non-null target) for
+`br_on_cast` and `(ref i31)` for `br_on_cast_fail`, above the label's `t*`. -/
+
+theorem br_on_cast_rejects_zero_result_label :
+    brOnCastErrorIs [(0, some [])] false "type mismatch" = true := by decide +kernel
+
+theorem br_on_cast_fail_rejects_zero_result_label :
+    brOnCastErrorIs [(0, some [])] true "type mismatch" = true := by decide +kernel
+
+theorem br_on_cast_rejects_zero_arity_only_label :
+    brOnCastErrorIs [(0, none)] false "type mismatch" = true := by decide +kernel
+
+theorem br_on_cast_fail_rejects_zero_arity_only_label :
+    brOnCastErrorIs [(0, none)] true "type mismatch" = true := by decide +kernel
+
+theorem br_on_cast_one_reference_label_stack :
+    brOnCastStack [(1, some [.ref false .i31])] [] false =
+      some [some (.ref true .any)] := by decide +kernel
+
+theorem br_on_cast_fail_one_reference_label_stack :
+    brOnCastStack [(1, some [.anyref])] [] true = some [some (.ref false .i31)] := by
+  decide +kernel
+
+theorem br_on_cast_multi_value_label_stack :
+    brOnCastStack [(2, some [.i32, .ref false .i31])] [some .i32] false =
+      some [some (.ref true .any), some .i32] := by decide +kernel
+
+theorem br_on_cast_fail_multi_value_label_stack :
+    brOnCastStack [(2, some [.i32, .anyref])] [some .i32] true =
+      some [some (.ref false .i31), some .i32] := by decide +kernel
+
+theorem br_on_cast_arity_only_label_stack :
+    brOnCastStack [(2, none)] [some .i32] false =
+      some [some (.ref true .any), some .i32] := by decide +kernel
+
+theorem br_on_cast_fail_arity_only_label_stack :
+    brOnCastStack [(2, none)] [some .i32] true =
+      some [some (.ref false .i31), some .i32] := by decide +kernel
 
 theorem validator_rejects_load_without_memory :
     validationErrorIs invalidLoadWithoutMemoryModule
