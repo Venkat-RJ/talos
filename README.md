@@ -103,12 +103,12 @@ Code that imports `CodeLib` never needs to import the interpreter directly —
 just build   # builds interpreter → codelib → programs in order
 ```
 
-Or build a single package:
+Or build a single package (each line runs from the repository root):
 
 ```bash
-cd interpreter   && lake exe cache get && lake build   # cache get: once, fetches prebuilt Mathlib
-cd codelib       && lake build
-cd programs/lean && lake build
+(cd interpreter   && lake exe cache get && lake build)   # cache get: once, fetches prebuilt Mathlib
+(cd codelib       && lake build)
+(cd programs/lean && lake build)
 ```
 
 `just build` runs the cache step for you.
