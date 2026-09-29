@@ -729,6 +729,11 @@ structure TableDecl where
   element indices are popped as `i64`, and `table.size` / `table.grow`
   speak `i64` instead of `i32`. -/
   is64     : Bool := false
+  /-- Initializer expression (function-references proposal): a constant
+  expression whose value fills every slot at instantiation, `(table N
+  elemtype (expr))`. Empty means the element type's null. Evaluated by
+  `Module.runTableInits`, alongside the other constant-expression passes. -/
+  init     : Program := []
 deriving Repr, Inhabited
 
 /-- Declaration of a function imported from the host. Imports occupy the

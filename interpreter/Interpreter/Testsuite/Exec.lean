@@ -1139,6 +1139,7 @@ private def instantiateModule (st : ScriptState) (m : Wasm.Module) (fuel : Nat) 
     assignResourceIds functionState m store0
   let store0 := reapplyLiteralActiveSegments m store0
   let store0 := m.runConstGlobals fuel store0 env
+  let store0 := m.runTableInits fuel store0 env
   let store0 := m.runConstElems fuel store0 env
   let store0 := m.runActiveSegments fuel store0 env
   match m.startFunc with
@@ -1369,6 +1370,7 @@ def runCommand
         assignResourceIds functionState m store0
       let store0 := reapplyLiteralActiveSegments m store0
       let store0 := m.runConstGlobals fuel store0 env
+      let store0 := m.runTableInits fuel store0 env
       let store0 := m.runConstElems fuel store0 env
       let store0 := m.runActiveSegments fuel store0 env
       let preparedState :=

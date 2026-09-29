@@ -567,7 +567,8 @@ private def emitTableDecl (t : Wasm.TableDecl) : String :=
     [field "min" (emitNat t.min)] ++
     fieldIf t.max.isSome "max" (emitOptionNat t.max) ++
     fieldIf (t.elemType != .funcref) "elemType" (emitValueType t.elemType) ++
-    fieldIf t.is64 "is64" (reprStr t.is64)
+    fieldIf t.is64 "is64" (reprStr t.is64) ++
+    fieldIf (!t.init.isEmpty) "init" (emitInstrList 3 t.init)
 
 private def emitFuncrefSlot : Option Nat → String
   | none   => "none"

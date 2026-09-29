@@ -126,4 +126,50 @@ theorem dispatch_slot0_terminates :
   runSteps_values_terminates dispatch_slot0_runs
 
 end Decoded
+
+/-! ### Table initializer expressions
+
+`(table N elemtype (expr))` fills every slot at instantiation. The pass runs
+with the other constant-expression passes (`Module.runTableInits`, after
+`runConstGlobals`); a literal `ref.func` fills the table, and an active segment
+already written by `initialStore` stays on top of the fill. -/
+
+namespace TableInit
+
+def literalModule : Module :=
+  { funcs := [{ body := [] }, { body := [] }]
+    tables := [{ min := 3, init := [.refFunc 0] }]
+    elements := [{ tableIdx := some 0, offset := some 1, funcs := [some 1] }] }
+
+theorem literal_fill :
+    (literalModule.runTableInits 10 (literalModule.initialStore (α := Unit))).tables =
+      [[.funcref (some 0), .funcref (some 1), .funcref (some 0)]] := by decide +kernel
+
+/- A `global.get` initializer goes through `exec`, which the kernel cannot
+reduce on a store, so that path is pinned by the spec rows instead
+(`table.wast:93`, tables `$t4` / `$t5`). -/
+
+/-! The text format allows the initializer folded, as source files write it,
+or unfolded, as `wasm-tools print` emits it; both decode to the same `init`. -/
+
+private def foldedWat : String :=
+  "(module (func) (table 3 funcref (ref.func 0)))"
+
+private def unfoldedWat : String :=
+  "(module (func) (table (;0;) 3 (ref func) ref.func 0))"
+
+theorem folded_decodes :
+    (Wasm.Examples.decodeOrDefault foldedWat).tables.map (·.init) = [[.refFunc 0]] := by
+  cbv
+
+theorem unfolded_decodes :
+    (Wasm.Examples.decodeOrDefault unfoldedWat).tables.map (·.init) = [[.refFunc 0]] := by
+  cbv
+
+theorem plain_table_has_no_init :
+    (Wasm.Examples.decodeOrDefault "(module (table 3 5 funcref))").tables.map
+      (fun t => (t.min, t.max, t.init)) = [(3, some 5, [])] := by
+  cbv
+
+end TableInit
 end Wasm

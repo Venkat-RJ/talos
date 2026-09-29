@@ -1550,6 +1550,17 @@ def Module.validate (m : Module) : Except String Unit := do
         | none => pure ()
         if segment.offsetExprPresent then
           m.checkConstProgram segment.offsetExpr addressType
+  -- Table initializer expressions are constant expressions of the element
+  -- type, checked under the import-only context: a `global.get` may name an
+  -- imported global but not one defined in this module (global.wast:675).
+  for table in m.tables do
+    if !table.init.isEmpty then
+      m.checkConstProgram table.init table.elemType
+      for instruction in table.init.allInstrs do
+        match instruction with
+        | .globalGet referencedIndex =>
+          if referencedIndex ≥ m.importedGlobals.length then throw "unknown global"
+        | _ => pure ()
   let nTypes := m.gcTypes.length
   -- Hand-built globals without a retained source initializer must agree with
   -- their literal runtime value. Decoded globals are checked from

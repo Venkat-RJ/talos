@@ -2343,6 +2343,40 @@ def Module.runConstGlobals (fuel : Nat) (m : Module) (st : Store α)
     gi := gi + 1
   return st
 
+/-- Fill each table that declares an initializer expression with its value
+(`(table N elemtype (expr))`). Runs after `runConstGlobals`, so `global.get`
+initializers see evaluated and imported globals, and before `runConstElems` /
+`runActiveSegments`. `initialStore` has already written this module's
+literal active element segments into the default-filled table, so those are
+re-applied on top of the fill; segments with constant-expression items or
+offsets are written by the later passes. Imported tables carry no initializer
+and are left to their exporter. -/
+def Module.runTableInits (fuel : Nat) (m : Module) (st : Store α)
+    (env : HostEnv α := {}) : Store α := Id.run do
+  let mut st := st
+  for (table, index) in m.tables.zipIdx do
+    if table.init.isEmpty then continue
+    let value? : Option Value :=
+      match evalConstRef table.init with
+      | some value => some value
+      | none =>
+        match exec fuel m st {} table.init env with
+        | .Fallthrough _ s' => s'.values.head?
+        | _ => none
+    match value?, st.tables[index]? with
+    | some value, some current =>
+      let mut filled : TableInst := List.replicate current.length value
+      for seg in m.elements do
+        match seg.tableIdx, seg.offset with
+        | some ti, some off =>
+          if ti = index && seg.offsetExpr.isEmpty && seg.exprs.isEmpty then
+            if off + seg.plainValues.length ≤ filled.length then
+              filled := listWriteAt filled off seg.plainValues
+        | _, _ => pure ()
+      st := { st with tables := st.tables.set index filled }
+    | _, _ => pure ()
+  return st
+
 /-- Evaluate the constant-expression items of active GC element segments
 (GC proposal) and write the resulting reference values into their tables.
 Runs after `runConstGlobals` so items may read globals. Plain funcref

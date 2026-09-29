@@ -62,6 +62,33 @@ def validMemoryCopy64ValidationModule : Module :=
           [.constI64 0, .constI64 0, .constI64 1, .memoryCopy] }]
     memory := some { pagesMin := 1, is64 := true } }
 
+/-! ### Table initializer expressions -/
+
+def validTableInitializerValidationModule : Module :=
+  { funcs := [{ body := [] }]
+    tables := [{ min := 3, elemType := .funcref, init := [.refFunc 0] }] }
+
+def invalidNonConstantTableInitializerValidationModule : Module :=
+  { funcs := [{ body := [] }]
+    tables := [{ min := 3, init := [.localGet 0] }] }
+
+def invalidMistypedTableInitializerValidationModule : Module :=
+  { funcs := [{ body := [] }]
+    tables := [{ min := 3, init := [.const 1] }] }
+
+/-- A table initializer may read an imported global, but not one defined in
+the same module (global.wast:675). -/
+def validImportedGlobalTableInitializerValidationModule : Module :=
+  { funcs := []
+    importedGlobals := [("m", "g")]
+    globals := [{ init := .funcref none, declaredType := some .funcref, isMut := false }]
+    tables := [{ min := 3, init := [.globalGet 0] }] }
+
+def invalidLocalGlobalTableInitializerValidationModule : Module :=
+  { funcs := []
+    globals := [{ init := .funcref none, declaredType := some .funcref, isMut := false }]
+    tables := [{ min := 3, init := [.globalGet 0] }] }
+
 def invalidLoadWithoutMemoryModule : Module :=
   { funcs := [{ body := [.const 0, .load32 0], results := [.i32] }] }
 
@@ -602,6 +629,25 @@ theorem validator_rejects_mistyped_memory64_copy_length :
 
 theorem validator_accepts_typed_memory64_copy :
     validationSucceeds validMemoryCopy64ValidationModule = true := by decide +kernel
+
+theorem validator_accepts_table_initializer :
+    validationSucceeds validTableInitializerValidationModule = true := by decide +kernel
+
+theorem validator_rejects_non_constant_table_initializer :
+    validationErrorIs invalidNonConstantTableInitializerValidationModule
+      "constant expression required" = true := by decide +kernel
+
+theorem validator_rejects_mistyped_table_initializer :
+    validationErrorIs invalidMistypedTableInitializerValidationModule
+      "type mismatch" = true := by decide +kernel
+
+theorem validator_accepts_imported_global_table_initializer :
+    validationSucceeds validImportedGlobalTableInitializerValidationModule = true := by
+  decide +kernel
+
+theorem validator_rejects_local_global_table_initializer :
+    validationErrorIs invalidLocalGlobalTableInitializerValidationModule
+      "unknown global" = true := by decide +kernel
 
 theorem validator_rejects_load_without_memory :
     validationErrorIs invalidLoadWithoutMemoryModule

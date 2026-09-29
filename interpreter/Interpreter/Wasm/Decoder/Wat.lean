@@ -2712,8 +2712,9 @@ The second value returned is an inline element segment (for the third
 form) or `none`. Non-funcref element types are accepted lexically with
 a zero-size declaration so unrelated modules still decode; nothing
 references those tables. -/
-private def parseTableDecl (funcIds : NameMap) (tableIdx : Nat)
+private def parseTableDecl (ctx : Ctx) (tableIdx : Nat)
     (xs : List Sexpr) : Except Err (Wasm.TableDecl × Option Wasm.ElementSegment) := do
+  let funcIds := ctx.funcIds
   let xs := match xs with
     | .atom a :: r => if startsWith a "$" then r else xs
     | _ => xs
@@ -2756,17 +2757,6 @@ private def parseTableDecl (funcIds : NameMap) (tableIdx : Nat)
         funcs := funcs }
     .ok ({ min := n, max := some n, elemType := .funcref, is64 },
       some segment)
-  | [.atom min, .atom elemTy] =>
-    -- Single-bound declaration. `funcref`/`externref` are modelled;
-    -- element types from unmodelled proposals fall back to `funcref` so
-    -- the index space stays aligned (nothing references those tables).
-    let n ← parseBound min
-    .ok ({ min := n, elemType := (atomToValueType? elemTy).getD .funcref, is64 }, none)
-  | [.atom min, .atom max, .atom elemTy] =>
-    let nMin ← parseBound min
-    let nMax ← parseBound max
-    .ok ({ min := nMin, max := some nMax,
-           elemType := (atomToValueType? elemTy).getD .funcref, is64 }, none)
   -- `wasm-tools print` preserves an explicit null table initializer as
   -- trailing instruction tokens rather than an inline element segment:
   -- `(table 10 funcref ref.null func)`. The ordinary initial-store
@@ -2775,22 +2765,29 @@ private def parseTableDecl (funcIds : NameMap) (tableIdx : Nat)
     let n ← parseBound min
     .ok ({ min := n, elemType := (atomToValueType? elemTy).getD .funcref,
            is64 }, none)
-  | [.atom min, .atom max, .atom elemTy, .atom "ref.null", .atom _heapTy] =>
-    let nMin ← parseBound min
-    let nMax ← parseBound max
-    .ok ({ min := nMin, max := some nMax,
-           elemType := (atomToValueType? elemTy).getD .funcref, is64 }, none)
-  -- List element types, e.g. `(table $t 1 1 (ref null $t))`. `listToValueType`
-  -- maps GC heap references to the `anyref` slot (so the table fills with the
-  -- managed null) and other ref types to funcref/externref.
-  | [.atom min, .list l] =>
-    let n ← parseBound min
-    .ok ({ min := n, elemType := listToValueType l, is64 }, none)
-  | [.atom min, .atom max, .list l] =>
-    let nMin ← parseBound min
-    let nMax ← parseBound max
-    .ok ({ min := nMin, max := some nMax, elemType := listToValueType l, is64 }, none)
+  -- A lone atom (e.g. a bare element type) keeps the permissive default.
   | [.atom _other] => .ok ({ min := 0, elemType := .funcref, is64 }, none)
+  -- Initializer expression (function-references proposal): everything after
+  -- the limits and element type is a constant expression, folded
+  -- `(ref.func $f)` in source or unfolded `ref.func $f` as `wasm-tools print`
+  -- emits it. Limits come first, then an atom or `(ref …)` element type.
+  | .atom min :: rest =>
+    let nMin ← parseBound min
+    let (nMax, rest) : Option Nat × List Sexpr := match rest with
+      | .atom second :: r =>
+        match parseBound second with
+        | .ok n => (some n, r)
+        | .error _ => (none, rest)
+      | _ => (none, rest)
+    let (elemType, rest) : Wasm.ValueType × List Sexpr := match rest with
+      | .atom elemTy :: r => ((atomToValueType? elemTy).getD .funcref, r)
+      | .list l :: r => (listToValueType l, r)
+      | _ => (.funcref, rest)
+    if rest.isEmpty then
+      .ok ({ min := nMin, max := nMax, elemType, is64 }, none)
+    else
+      let init ← parseInstrSeq ctx rest
+      .ok ({ min := nMin, max := nMax, elemType, is64, init }, none)
   | _ => .error "malformed (table ...) declaration"
 
 /-- Whether a `(ref null? ht)` element type uses the constant-expression
@@ -2894,7 +2891,15 @@ private def parseElemSegment (ctx : Ctx)
   | _ => pure ()
   if isDeclarative then
     offset := none; offsetExprPresent := false; offsetExpr := []
-  if isGc then
+  -- A funcref/externref segment whose items include a constant expression
+  -- other than `ref.func` / `ref.null` (e.g. `(global.get $g)`, elem.wast:1043)
+  -- also takes the const-expr path; the element type is kept.
+  let hasExprItem := rest.any fun
+    | .list [.atom "ref.func", _] | .list [.atom "ref.null", _] => false
+    | .list (.atom "item" :: _) => false
+    | .list _ => true
+    | _ => false
+  if isGc || hasExprItem then
     -- Each item is a `(item <const-expr>)` (or a bare const-expr) producing
     -- one reference value; keep the program for `runConstElems`.
     let mut exprs : List Wasm.Program := []
@@ -3070,7 +3075,7 @@ private def collectEntityImports (funcIds : NameMap)
       match kind with
       | "global" => globs := globs ++ [(key, parseImportedGlobal body)]
       | "table"  =>
-        let (td, _) ← parseTableDecl funcIds 0 body
+        let (td, _) ← parseTableDecl { Ctx.empty with funcIds } 0 body
         tbls := tbls ++ [(key, td)]
       | "memory" => mems := mems ++ [(key, ← parseMemDecl body)]
       | _ => pure ()
@@ -3248,7 +3253,8 @@ private def parseModuleWith (rejectUnsupported : Bool)
     | .list (.atom "table" :: body) =>
       for n in inlineExportsOf body do
         tableExports := tableExports.push (n, tblImps.length + tableDecls.size)
-      let (td, inlineSeg?) ← parseTableDecl funcIds (tblImps.length + tableDecls.size) body
+      let tctx : Ctx := { Ctx.empty with funcIds := funcIds, globalIds := globalIds, types := types, tableNames := tableNames, elemNames := elemNames, memNames := memNames, tagNames := tagNames, rejectUnsupported }
+      let (td, inlineSeg?) ← parseTableDecl tctx (tblImps.length + tableDecls.size) body
       tableDecls := tableDecls.push td
       match inlineSeg? with
       | some seg => elemSegs := elemSegs.push seg
