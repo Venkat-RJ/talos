@@ -246,8 +246,10 @@ wasm_twp_pure_rule twp_gtU {lhs rhs result : UInt32}
 
 wasm_twp_pure_rule twp_select
     {first second selected : Value} {condition : UInt32}
+    {resultTypes : Option (List ValueType)}
     (h : selected = if condition ≠ 0 then first else second) :
-  .select, .i32 condition :: second :: first :: values => selected :: values := Step.select h
+  .select resultTypes, .i32 condition :: second :: first :: values =>
+    selected :: values := Step.select h
 
 theorem twp_iff
     {params localValues values : List Value}
