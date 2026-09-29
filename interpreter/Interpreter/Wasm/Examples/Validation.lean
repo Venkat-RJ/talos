@@ -945,6 +945,61 @@ def validDefaultableLocalReadBeforeSetValidationModule : Module :=
       [{ locals := [.externref, .i32],
          body := [.localGet 0, .drop, .localGet 1, .drop] }] }
 
+/-! Structured constructs other than `block`/`if`: a `loop` or `try_table`
+body starts from the initializations made before it and forgets its own when
+it ends, at any nesting depth. Stack polymorphism after `unreachable` does not
+initialize a local, while a `local.set` in unreachable code still does. -/
+
+def invalidUninitializedLocalAfterLoopValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body := [.loop 0 0 [.localGet 0, .localSet 1], .localGet 1, .drop] }] }
+
+def validInitializedLocalReadInLoopValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body := [.localGet 0, .localSet 1, .loop 0 0 [.localGet 1, .drop]] }] }
+
+def validLocalSetThenReadInLoopValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body := [.loop 0 0 [.localGet 0, .localSet 1, .localGet 1, .drop]] }] }
+
+def invalidUninitializedLocalAfterTryTableValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body :=
+          [.tryTable 0 0 [] [.localGet 0, .localSet 1] [] [], .localGet 1, .drop] }] }
+
+def validInitializedLocalReadInTryTableValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body :=
+          [.localGet 0, .localSet 1, .tryTable 0 0 [] [.localGet 1, .drop] [] []] }] }
+
+def invalidUninitializedLocalAfterNestedBlockValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body :=
+          [.block 0 0 [.block 0 0 [.localGet 0, .localSet 1], .localGet 1, .drop]] }] }
+
+def validInitializedLocalReadInNestedBlockValidationModule : Module :=
+  { funcs :=
+      [{ params := [.ref false .«extern»], locals := [.ref false .«extern»],
+         body :=
+          [.localGet 0, .localSet 1,
+           .block 0 0 [.loop 0 0 [.block 0 0 [.localGet 1, .drop]]]] }] }
+
+def invalidUninitializedLocalAfterUnreachableValidationModule : Module :=
+  { funcs :=
+      [{ locals := [.ref false .«extern»],
+         body := [.unreachable, .localGet 0, .drop] }] }
+
+def validLocalSetInUnreachableCodeValidationModule : Module :=
+  { funcs :=
+      [{ locals := [.ref false .«extern»],
+         body := [.unreachable, .localSet 0, .localGet 0, .drop] }] }
+
 theorem validator_rejects_uninitialized_local :
     validationErrorIs invalidUninitializedLocalValidationModule
       "uninitialized local" = true := by decide +kernel
@@ -976,5 +1031,41 @@ theorem validator_accepts_initialized_local_read_in_block :
 
 theorem validator_accepts_defaultable_local_read_before_set :
     validationSucceeds validDefaultableLocalReadBeforeSetValidationModule = true := by decide +kernel
+
+theorem validator_rejects_uninitialized_local_after_loop :
+    validationErrorIs invalidUninitializedLocalAfterLoopValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_accepts_initialized_local_read_in_loop :
+    validationSucceeds validInitializedLocalReadInLoopValidationModule = true := by
+  decide +kernel
+
+theorem validator_accepts_local_set_then_read_in_loop :
+    validationSucceeds validLocalSetThenReadInLoopValidationModule = true := by
+  decide +kernel
+
+theorem validator_rejects_uninitialized_local_after_try_table :
+    validationErrorIs invalidUninitializedLocalAfterTryTableValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_accepts_initialized_local_read_in_try_table :
+    validationSucceeds validInitializedLocalReadInTryTableValidationModule = true := by
+  decide +kernel
+
+theorem validator_rejects_uninitialized_local_after_nested_block :
+    validationErrorIs invalidUninitializedLocalAfterNestedBlockValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_accepts_initialized_local_read_in_nested_block :
+    validationSucceeds validInitializedLocalReadInNestedBlockValidationModule = true := by
+  decide +kernel
+
+theorem validator_rejects_uninitialized_local_after_unreachable :
+    validationErrorIs invalidUninitializedLocalAfterUnreachableValidationModule
+      "uninitialized local" = true := by decide +kernel
+
+theorem validator_accepts_local_set_in_unreachable_code :
+    validationSucceeds validLocalSetInUnreachableCodeValidationModule = true := by
+  decide +kernel
 
 end Wasm.Examples.SmallStep
