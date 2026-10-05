@@ -118,6 +118,28 @@ def validBrOnCastFailStructValidationModule : Module :=
             [.localGet 0, .gc (.brOnCastFail 0 true (.concrete 0) (some .anyref))]
             [] [.anyref]] }] }
 
+/-- `nofunc` is the bottom of the func hierarchy, so
+`br_on_cast l (ref null $f) nullfuncref` is valid for a function type `$f`. -/
+def validBrOnCastFuncToNullFuncValidationModule : Module :=
+  { gcTypes := [{ comp := .func {} }]
+    funcs :=
+      [{ params := [.ref true (.concrete 0)], results := [.ref true (.concrete 0)],
+         body :=
+          [.block 0 1
+            [.localGet 0, .gc (.brOnCast 0 true .noFunc (some (.ref true (.concrete 0))))]
+            [] [.ref true (.concrete 0)]] }] }
+
+/-- `none` is the bottom of the any hierarchy only, so it is not a subtype of a
+function type: `br_on_cast l (ref null $f) nullref` is invalid. -/
+def invalidBrOnCastFuncToNullRefValidationModule : Module :=
+  { gcTypes := [{ comp := .func {} }]
+    funcs :=
+      [{ params := [.ref true (.concrete 0)], results := [.ref true (.concrete 0)],
+         body :=
+          [.block 0 1
+            [.localGet 0, .gc (.brOnCast 0 true .noneT (some (.ref true (.concrete 0))))]
+            [] [.ref true (.concrete 0)]] }] }
+
 /-- WebAssembly/gc#516: after the fall-through, the operand below the reference
 has the label's type `funcref`, so `call 0` (expecting `(ref null 0)`) mistypes. -/
 def invalidBrOnCastUpcastsOperandsBelowValidationModule : Module :=
@@ -775,6 +797,14 @@ theorem validator_accepts_br_on_cast_i31 :
 
 theorem validator_accepts_br_on_cast_fail_struct :
     validationSucceeds validBrOnCastFailStructValidationModule = true := by decide +kernel
+
+theorem validator_accepts_br_on_cast_func_to_nullfunc :
+    validationSucceeds validBrOnCastFuncToNullFuncValidationModule = true := by
+  decide +kernel
+
+theorem validator_rejects_br_on_cast_func_to_nullref :
+    validationErrorIs invalidBrOnCastFuncToNullRefValidationModule
+      "type mismatch" = true := by decide +kernel
 
 theorem validator_rejects_br_on_cast_upcasts_operands_below :
     validationErrorIs invalidBrOnCastUpcastsOperandsBelowValidationModule

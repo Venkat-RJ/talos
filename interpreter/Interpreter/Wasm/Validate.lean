@@ -717,14 +717,26 @@ def Module.resolveHeapType (m : Module) : GcHeapType → GcHeapType
       | none => .named name
   | heap => heap
 
+/-- Whether concrete type index `index` is a function type, i.e. lies in the
+func hierarchy. A function type may live only in `types` (not `gcTypes`). -/
+def Module.concreteIsFunc (m : Module) (index : Nat) : Bool :=
+  match m.gcComposite? index with
+  | some (.func _) => true
+  | some _ => false
+  | none => (m.types[index]?).isSome
+
 def Module.heapSubtype (m : Module) (actual expected : GcHeapType) : Bool :=
   let actual := m.resolveHeapType actual
   let expected := m.resolveHeapType expected
   if actual == expected then true else
   match actual, expected with
   | .noFunc, .func | .noExtern, .extern | .noExn, .exn => true
+  -- Bottom types: `nofunc` is below every function type, `none` below every
+  -- struct/array type (each concrete type is in exactly one hierarchy).
+  | .noFunc, .concrete index => m.concreteIsFunc index
+  | .noneT, .concrete index => !m.concreteIsFunc index
   | .noneT, .any | .noneT, .eq | .noneT, .i31
-  | .noneT, .structT | .noneT, .arrayT | .noneT, .concrete _ => true
+  | .noneT, .structT | .noneT, .arrayT => true
   | .i31, .eq | .i31, .any => true
   | .structT, .eq | .structT, .any
   | .arrayT, .eq | .arrayT, .any => true
@@ -1186,14 +1198,7 @@ def Module.heapTop (m : Module) (heap : GcHeapType) : GcHeapType :=
   | .func | .noFunc => .func
   | .extern | .noExtern => .extern
   | .exn | .noExn => .exn
-  | .concrete index =>
-      match m.gcComposite? index with
-      | some (.func _) => .func
-      | some _ => .any
-      -- Unreachable from `Module.validate` (the GC type-reference check
-      -- rejects indices outside `gcTypes` first); kept so the function is
-      -- total and consistent with `Module.typeIndexKnown` for direct callers.
-      | none => if (m.types[index]?).isSome then .func else .any
+  | .concrete index => if m.concreteIsFunc index then .func else .any
   | _ => .any
 
 /-- Whether a cast operand is a reference in the target type's hierarchy. A
