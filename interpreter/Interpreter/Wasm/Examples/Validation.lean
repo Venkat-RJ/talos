@@ -71,6 +71,25 @@ def invalidReversedTableLimitsValidationModule : Module :=
 def invalidReversedTable64LimitsValidationModule : Module :=
   { funcs := [], tables := [{ min := 0xffff_ffff, max := some 0, is64 := true }] }
 
+/-- Limits are checked on imported tables too (only the defaultable-element
+rule exempts imports). -/
+def invalidReversedImportedTableLimitsValidationModule : Module :=
+  { funcs := []
+    importedTables := [("M", "t")]
+    tables := [{ min := 1, max := some 0 }] }
+
+/-- A hand-built 32-bit table whose minimum exceeds `2^32-1` (`table.wast:36`). -/
+def invalidOversizedTableMinValidationModule : Module :=
+  { funcs := [], tables := [{ min := 0x1_0000_0000 }] }
+
+/-- A hand-built 32-bit table whose maximum exceeds `2^32-1` (`table.wast:44`). -/
+def invalidOversizedTableMaxValidationModule : Module :=
+  { funcs := [], tables := [{ min := 0, max := some 0x1_0000_0000 }] }
+
+/-- The 32-bit range does not apply to 64-bit tables. -/
+def validLargeTable64LimitsValidationModule : Module :=
+  { funcs := [], tables := [{ min := 0x1_0000_0000, is64 := true }] }
+
 def validEqualTableLimitsValidationModule : Module :=
   { funcs := [], tables := [{ min := 3, max := some 3 }] }
 
@@ -645,6 +664,21 @@ theorem validator_rejects_reversed_table_limits :
 theorem validator_rejects_reversed_table64_limits :
     validationErrorIs invalidReversedTable64LimitsValidationModule
       "size minimum must not be greater than maximum" = true := by decide +kernel
+
+theorem validator_rejects_reversed_imported_table_limits :
+    validationErrorIs invalidReversedImportedTableLimitsValidationModule
+      "size minimum must not be greater than maximum" = true := by decide +kernel
+
+theorem validator_rejects_oversized_table_min :
+    validationErrorIs invalidOversizedTableMinValidationModule
+      "table size" = true := by decide +kernel
+
+theorem validator_rejects_oversized_table_max :
+    validationErrorIs invalidOversizedTableMaxValidationModule
+      "table size" = true := by decide +kernel
+
+theorem validator_accepts_large_table64_limits :
+    validationSucceeds validLargeTable64LimitsValidationModule = true := by decide +kernel
 
 theorem validator_accepts_equal_table_limits :
     validationSucceeds validEqualTableLimitsValidationModule = true := by decide +kernel

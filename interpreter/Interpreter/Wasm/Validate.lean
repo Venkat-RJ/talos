@@ -1504,14 +1504,21 @@ def Module.checkConstProgram
         if (m.funcSig? functionIndex).isNone then throw "unknown function"
     | _ => pure ()
 
-/-- A table's declared minimum size may not exceed its declared maximum. -/
+/-- A table's declared limits must be in range for its address type, and its
+minimum size may not exceed its declared maximum. Decoded modules already have
+in-range limits (the parser bounds them); the 32-bit range check guards
+hand-built modules, whose `min`/`max` are unbounded `Nat`s. 64-bit limits always
+fit `2^64-1` once decoded, so they are not re-checked here. -/
 def TableDecl.checkLimits (table : TableDecl) : Except String Unit :=
-  match table.max with
-  | some maximum =>
-      if table.min > maximum then
-        .error "size minimum must not be greater than maximum"
-      else .ok ()
-  | none => .ok ()
+  if !table.is64 && (table.min > 0xffff_ffff || table.max.any (· > 0xffff_ffff)) then
+    .error "table size"
+  else
+    match table.max with
+    | some maximum =>
+        if table.min > maximum then
+          .error "size minimum must not be greater than maximum"
+        else .ok ()
+    | none => .ok ()
 
 /-- A table the module declares itself must have an element type with a
 default value. A non-nullable element type is only valid together with an
@@ -1526,6 +1533,12 @@ def TableDecl.checkDefaultableElement (table : TableDecl) : Except String Unit :
 /-- Run the partial structural validator. `throw` on the first violation. -/
 def Module.validate (m : Module) : Except String Unit := do
   m.checkInterface
+  -- Table types (validated before code, in spec order): limits for every
+  -- table; a defaultable element type for the module's own tables. Imports
+  -- occupy the low indices.
+  for (table, index) in m.tables.zipIdx do
+    table.checkLimits
+    if index ≥ m.importedTables.length then table.checkDefaultableElement
   if m.dataWithoutMemory then throw "unknown memory"
   match m.memory with
   | none => pure ()
@@ -1658,10 +1671,5 @@ def Module.validate (m : Module) : Except String Unit := do
   for f in m.funcs do
     Program.checkBranchDepth 0 f.body
     m.checkFuncStraight f
-  -- 5. Table declarations: limits for every table; a defaultable element type
-  -- for the module's own tables. Imports occupy the low indices.
-  for (table, index) in m.tables.zipIdx do
-    table.checkLimits
-    if index ≥ m.importedTables.length then table.checkDefaultableElement
 
 end Wasm
