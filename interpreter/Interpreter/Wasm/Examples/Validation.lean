@@ -496,6 +496,36 @@ def validKnownTypeRefsValidationModule : Module :=
          body := [.localGet 0, .drop, .refNull (.ref true (.concrete 0)), .drop] }]
     tables := [{ min := 1, elemType := .ref true (.concrete 0) }] }
 
+/-! ### Forward type references across recursion groups (`type-rec.wast:22,29`,
+`type-equivalence.wast:77`)
+
+A type definition may name only types in its own `rec` group or in earlier
+ones, and a declared supertype must precede the type. -/
+
+def invalidForwardTypeRefValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .func { params := [.ref false (.concrete 1)] } },
+       { comp := .func {} }] }
+
+def invalidForwardTypeRefAcrossRecGroupsValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .func { params := [.ref false (.concrete 1)] }, recGroup := some 0 },
+       { comp := .func {}, recGroup := some 1 }] }
+
+def invalidForwardSupertypeValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .func {}, super := some 1, «final» := false },
+       { comp := .func {}, «final» := false }] }
+
+def validForwardTypeRefWithinRecGroupValidationModule : Module :=
+  { funcs := []
+    gcTypes :=
+      [{ comp := .func { params := [.ref false (.concrete 1)] }, recGroup := some 0 },
+       { comp := .func { results := [.ref false (.concrete 0)] }, recGroup := some 0 }] }
+
 def validationErrorIs (module : Module) (expected : String) : Bool :=
   match module.validate with
   | .error actual => actual == expected
@@ -622,6 +652,22 @@ theorem validator_rejects_unknown_type_in_ref_null :
 
 theorem validator_accepts_known_type_refs :
     validationSucceeds validKnownTypeRefsValidationModule = true := by decide +kernel
+
+theorem validator_rejects_forward_type_ref :
+    validationErrorIs invalidForwardTypeRefValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_rejects_forward_type_ref_across_rec_groups :
+    validationErrorIs invalidForwardTypeRefAcrossRecGroupsValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_rejects_forward_supertype :
+    validationErrorIs invalidForwardSupertypeValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_accepts_forward_type_ref_within_rec_group :
+    validationSucceeds validForwardTypeRefWithinRecGroupValidationModule = true := by
+  decide +kernel
 
 theorem validator_accepts_passive_data_without_linear_memory :
     passiveDataWithoutMemoryModule.dataWithoutMemory = false ∧
