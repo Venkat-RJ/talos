@@ -774,8 +774,10 @@ structure CheckState where
   (function-references proposal, "local initialization"). Parameters are
   initialized on entry; `local.set`/`local.tee` initialize their target; a
   structured construct restores the set it started with when it ends. Only
-  consulted for locals whose type has no default value. -/
-  initialized : List Nat := []
+  consulted for locals whose type has no default value. Deliberately has no
+  default: every fresh state must say which locals it inherits, so a new
+  structured construct cannot silently forget the enclosing set. -/
+  initialized : List Nat
 
 def checkedCompat (m : Module) (actual : CheckedType)
     (expected : ValueType) : Bool :=
