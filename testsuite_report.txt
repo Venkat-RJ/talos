@@ -64001,7 +64001,7 @@ type-equivalence.wast:16 module pass
 type-equivalence.wast:30 module pass
 type-equivalence.wast:38 module pass
 type-equivalence.wast:49 module pass
-type-equivalence.wast:77 assert_invalid skipped:assert_invalid: not rejected
+type-equivalence.wast:77 assert_invalid pass
 type-equivalence.wast:89 module pass
 type-equivalence.wast:102 assert_return pass
 type-equivalence.wast:107 module pass
@@ -64029,8 +64029,8 @@ type-equivalence.wast:290 module pass
 type-equivalence.wast:307 register pass
 type-equivalence.wast:308 module pass
 type-rec.wast:3 module pass
-type-rec.wast:22 assert_invalid skipped:assert_invalid: not rejected
-type-rec.wast:29 assert_invalid skipped:assert_invalid: not rejected
+type-rec.wast:22 assert_invalid pass
+type-rec.wast:29 assert_invalid pass
 type-rec.wast:39 module pass
 type-rec.wast:45 module pass
 type-rec.wast:52 assert_invalid pass
