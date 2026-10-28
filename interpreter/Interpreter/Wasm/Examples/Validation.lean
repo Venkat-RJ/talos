@@ -845,6 +845,23 @@ def invalidUnknownTypeInBlockResultValidationModule : Module :=
 def invalidUnknownTypeInRefNullValidationModule : Module :=
   { funcs := [{ body := [.refNull (.ref true (.concrete 1)), .drop] }] }
 
+/-- Cast source annotations must name a declared type even in unreachable code. -/
+def invalidUnknownTypeInBrOnCastSourceValidationModule : Module :=
+  { funcs :=
+      [{ results := [.funcref],
+         body :=
+          [.unreachable,
+           .gc (.brOnCast 0 true .noFunc (some (.ref true (.concrete 1)))),
+           .drop, .unreachable] }] }
+
+def invalidUnknownTypeInBrOnCastFailSourceValidationModule : Module :=
+  { funcs :=
+      [{ results := [.funcref],
+         body :=
+          [.unreachable,
+           .gc (.brOnCastFail 0 true .noFunc (some (.ref true (.concrete 1)))),
+           .drop, .unreachable] }] }
+
 def validKnownTypeRefsValidationModule : Module :=
   { types := [{}]
     funcs :=
@@ -1004,6 +1021,14 @@ theorem validator_rejects_unknown_type_in_block_result :
 
 theorem validator_rejects_unknown_type_in_ref_null :
     validationErrorIs invalidUnknownTypeInRefNullValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_rejects_unknown_type_in_br_on_cast_source :
+    validationErrorIs invalidUnknownTypeInBrOnCastSourceValidationModule
+      "unknown type" = true := by decide +kernel
+
+theorem validator_rejects_unknown_type_in_br_on_cast_fail_source :
+    validationErrorIs invalidUnknownTypeInBrOnCastFailSourceValidationModule
       "unknown type" = true := by decide +kernel
 
 theorem validator_accepts_known_type_refs :
